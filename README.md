@@ -135,7 +135,7 @@ In this case, lien's slope calculation won't be affected in the `beforePayment` 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/259 
 
 ## Found by 
-\_\_141345\_\_
+\_\_141345\_\_, 0xRajeev
 
 ## Summary
 
@@ -226,64 +226,280 @@ Manual Review
   }
 ```
 
-# Issue H-4: `AuctionHouse.createBid()` doesn't handle incoming payments properly. 
+## Discussion
 
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/223 
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Duplicate of #194, two sides of the same coin. One points out it that buyout doesn't decrement correctly on one side and the other points out it doesn't increment correctly on the other side
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Duplicate of #194, two sides of the same coin. One points out it that buyout doesn't decrement correctly on one side and the other points out it doesn't increment correctly on the other side
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation rejected.
+
+The argument is not giving us full conviction this should be tagged as a duplicate.
+
+**sherlock-admin**
+
+> Escalation rejected.
+> 
+> The argument is not giving us full conviction this should be tagged as a duplicate.
+
+This issue's escalations have been rejected!
+
+Watsons who escalated this issue will have their escalation amount deducted from their next payout.
+
+
+
+# Issue H-4: _deleteLienPosition can be called by anyone to delete any lien they wish 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/233 
 
 ## Found by 
-csanuragjain, hansfriese, neila
+tives, ctf\_sec, 0x0, obront, TurnipBoy, yixxas, zzykxx
 
 ## Summary
-`AuctionHouse.createBid()` doesn't handle incoming payments properly.
+
+`_deleteLienPosition` is a public function that doesn't check the caller. This allows anyone to call it an remove whatever lien they wish from whatever collateral they wish
 
 ## Vulnerability Detail
-`AuctionHouse.createBid()` is used to receive bids from users and it refunds the last bidder when there is a new bidder with a higher bid amount.
 
-But it doesn't handle the incoming payment for the new bidder [here](https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L118).
+    function _deleteLienPosition(uint256 collateralId, uint256 position) public {
+      uint256[] storage stack = liens[collateralId];
+      require(position < stack.length, "index out of bounds");
 
-```solidity
-    if (firstBidTime == 0) {
-      auctions[tokenId].firstBidTime = block.timestamp.safeCastTo64();
-    } else if (lastBidder != address(0)) {
-      uint256 lastBidderRefund = amount - vaultPayment;
-      _handleOutGoingPayment(lastBidder, lastBidderRefund);
+      emit RemoveLien(
+        stack[position],
+        lienData[stack[position]].collateralId,
+        lienData[stack[position]].position
+      );
+      for (uint256 i = position; i < stack.length - 1; i++) {
+        stack[i] = stack[i + 1];
+      }
+      stack.pop();
     }
 
-    _handleIncomingPayment(tokenId, vaultPayment, address(msg.sender)); //@audit vaultPayment => amount
-```
-
-It should request the whole `amount` but `amount - currentBid` now.
+`_deleteLienPosition` is a `public` function and doesn't validate that it's being called by any permissioned account. The result is that anyone can call it to delete any lien that they want. It wouldn't remove the lien data but it would remove it from the array associated with `collateralId`, which would allow it to pass the `CollateralToken.sol#releaseCheck` and the underlying to be withdrawn by the user. 
 
 ## Impact
-`AuctionHouse.createBid()` requests a smaller amount than it should from the second bidder so the auction house protocol is lack funds.
+
+All liens can be deleted completely rugging lenders
 
 ## Code Snippet
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L118
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L651-L664
 
 ## Tool used
+
 Manual Review
 
 ## Recommendation
-It should request the whole amount like below.
 
-```solidity
-    _handleIncomingPayment(tokenId, amount, address(msg.sender));
-```
+Change `_deleteLienPosition` to `internal` rather than `public`.
 
 ## Discussion
 
-**SantiagoGregory**
+**IAmTurnipBoy**
 
-The initial bid is paid to the vault, and new test coverage has confirmed multiple bid payouts are correct.
+Escalate for 1 USDC
+
+Deleting leans allows borrower to steal funds because they never have to repay the funds the borrowed. Should be high risk
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Deleting leans allows borrower to steal funds because they never have to repay the funds the borrowed. Should be high risk
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted
+
+**sherlock-admin**
+
+> Escalation accepted
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
 
 
 
-# Issue H-5: Canceling an auction with 0 bids will only partially pay back the outstanding debt 
+# Issue H-5: `commitToLiens` always reverts 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/204 
+
+## Found by 
+bin2chen, HonorLt, 0xRajeev, rvierdiiev, Jeiwan
+
+## Summary
+
+The function `commitToLiens()` always reverts at the call to `_returnCollateral()` which prevents borrowers from depositing collateral and requesting loans in the protocol.
+
+## Vulnerability Detail
+
+The collateral token with `collateralId` is already minted directly to the caller (i.e. borrower) in `commitToLiens()` at the call to `_transferAndDepositAsset()` function. That's because while executing `_transferAndDepositAsset` the NFT is transferred to `COLLATERAL_TOKEN` whose `onERC721Received` mints the token with `collateralId` to borrower (`from` address) and not the `operator_` (i.e. `AstariaRouter`) because `operator_ != from_`.
+
+However, the call to `_returnCollateral()` in `commitToLiens()` incorrectly assumes that this has been minted to the operator and attempts to transfer it to the borrower which will revert because the `collateralId` is not owned by  `AstariaRouter` as it has already been transferred/minted to the borrower.
+
+## Impact
+
+The function `commitToLiens()` always reverts, preventing borrowers from depositing collateral and requesting loans in the protocol, thereby failing to bootstrap its core NFT lending functionality.
+
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L244-L274
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L578-L587
+3. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/CollateralToken.sol#L282-L284
+4. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L589-L591
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+Remove the call to `_returnCollateral()` in `commitToLiens()`.
+
+## Discussion
+
+**secureum**
+
+Escalate for 2 USDC.
+
+Given the impact of failing to bootstrap core protocol functionality as described above, we still think this is of high-severity (not Medium as judged) unlike a DoS that affects only a minority of protocol flows. Also, this is not a dup of #195.
+
+cc @berndartmueller @lucyoa
+
+**sherlock-admin**
+
+ > Escalate for 2 USDC.
+> 
+> Given the impact of failing to bootstrap core protocol functionality as described above, we still think this is of high-severity (not Medium as judged) unlike a DoS that affects only a minority of protocol flows. Also, this is not a dup of #195.
+> 
+> cc @berndartmueller @lucyoa
+
+You've created a valid escalation for 2 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted
+
+**sherlock-admin**
+
+> Escalation accepted
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue H-6: Canceling an auction does not refund the current highest bidder 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/202 
+
+## Found by 
+chainNue, minhquanym, hansfriese, bin2chen, TurnipBoy, peanuts, neila, Prefix, csanuragjain, 0xRajeev, Jeiwan
+
+## Summary
+
+If the collateral token owner cancels the active auction and repays outstanding debt, the current highest bidder will not be refunded and loses their funds.
+
+## Vulnerability Detail
+
+The `AuctionHouse.createBid()` function refunds the previous bidder if there is one. The same logic would also be necessary in the `AuctionHouse.cancelAuction()` function but is missing.
+
+## Impact
+If the collateral token owner cancels the active auction and repays outstanding debt (`reservePrice`), the current highest bidder will not be refunded and will therefore lose their funds which can also be exploited by a malicious borrower.
+
+Potential exploit scenario: A malicious borrower can let the loan expire without repayment, trigger an auction, let bids below reserve price, and (hope to) front-run any bid >= reserve price to cancel the auction which effectively lets the highest bidder pay out (most of) the liens instead of the borrower.
+
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L113-L116
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L210-L224
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Add the refund logic (via `_handleOutGoingPayment()` to the current bidder) in the cancel auction flow similar to the create bid auction flow.
+
+## Discussion
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Huge loss of funds for bidder. High risk
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Huge loss of funds for bidder. High risk
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+
+Escalation accepted.
+
+
+
+**sherlock-admin**
+
+> 
+> Escalation accepted.
+> 
+> 
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue H-7: Canceling an auction with 0 bids will only partially pay back the outstanding debt 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/199 
 
 ## Found by 
-0xRajeev, TurnipBoy, 0x4141, Jeiwan
+0x4141, bin2chen, TurnipBoy, 0xRajeev, Jeiwan
 
 ## Summary
 
@@ -319,7 +535,7 @@ Manual Review
 ## Recommendation
 The auction cancellation amount required should be reserve price + liquidation fee. On payment, remaining liens should be removed.
 
-# Issue H-6: Canceling an auction will result in a loss of borrower funds towards initiator fees 
+# Issue H-8: Canceling an auction will result in a loss of borrower funds towards initiator fees 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/198 
 
@@ -351,7 +567,167 @@ Manual Review
 
 The cancellation amount required should be the reserve price + liquidation fee, where the fee is calculated on `(reserve price - current bid)` and not the reserve price.
 
-# Issue H-7: Lien count per epoch is not updated ultimately locking the collateralized NFT 
+# Issue H-9: Public vaults can become insolvent because of missing `yIntercept` update 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/197 
+
+## Found by 
+0xRajeev, zzykxx
+
+## Summary
+
+The deduction of `yIntercept` during payments is missing in `beforePayment()` which can lead to vault insolvency.
+
+## Vulnerability Detail
+
+`yIntercept` is declared as "sum of all LienToken amounts" and documented elsewhere as "yIntercept (virtual assets) of a PublicVault". It is used to calculate the total assets of a public vault as: `slope.mulDivDown(delta_t, 1) + yIntercept`.
+
+It is expected to be updated on deposits, payments, withdrawals, liquidations. However, the deduction of `yIntercept` during payments is missing in `beforePayment()`. As noted in the function's Natspec:
+```solidity
+ /**
+   * @notice Hook to update the slope and yIntercept of the PublicVault on payment.
+   * The rate for the LienToken is subtracted from the total slope of the PublicVault, and recalculated in afterPayment().
+   * @param lienId The ID of the lien.
+   * @param amount The amount paid off to deduct from the yIntercept of the PublicVault.
+   */
+```
+the amount of payment should be deducted from `yIntercept` but is missing. 
+
+## Impact
+
+PoC: https://gist.github.com/berndartmueller/477cc1026d3fe3e226795a34bb8a903a
+
+This missing update will inflate the inferred value of the public vault corresponding to its actual value leading to eventual insolvency because of resulting protocol miscalculations.
+
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L427-L442
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Update `yIntercept` in `beforePayment()` by the `amount` value.
+
+## Discussion
+
+**androolloyd**
+
+tagging @SantiagoGregory but i believe this is a documentation error, will address
+
+**secureum**
+
+Escalate for 2 USDC.
+
+Given the vault insolvency impact as described and demonstrated by the PoC, we still think this is a high-severity impact (not Medium as judged). The other dup #92 also reported this as a High.
+
+cc @berndartmueller @lucyoa
+
+**sherlock-admin**
+
+ > Escalate for 2 USDC.
+> 
+> Given the vault insolvency impact as described and demonstrated by the PoC, we still think this is a high-severity impact (not Medium as judged). The other dup #92 also reported this as a High.
+> 
+> cc @berndartmueller @lucyoa
+
+You've created a valid escalation for 2 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted
+
+**sherlock-admin**
+
+> Escalation accepted
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue H-10: `LienToken.buyoutLien` will always revert 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/196 
+
+## Found by 
+8olidity, ctf\_sec, zzykxx, supernova, yixxas, neila, cccz, 0xRajeev, rvierdiiev
+
+## Summary
+
+`buyoutLien()` will always revert, preventing the borrower from refinancing.
+
+## Vulnerability Detail
+
+`buyoutFeeDenominator` is `0` without a setter which will cause `getBuyoutFee()` to revert in the `buyoutLien()` flow. 
+
+## Impact
+
+Refinancing is a crucial feature of the protocol to allow a borrower to refinance their loan if a certain minimum improvement of interest rate or duration is offered. The reverting `buyoutLien()` flow will prevent the borrower from refinancing and effectively lead to loss of their funds due to lock-in into currently held loans when better terms are available.
+
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L71
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L456
+3. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L377
+4. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L132
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Initialize the buyout fee numerator and denominator in `AstariaRouter` and add their setters to `file()`.
+
+## Discussion
+
+**secureum**
+
+Escalate for 2 USDC.
+
+Given the potential impact to different flows/contexts, we still think this is a high-severity impact (not Medium as judged). A majority of the dups (while some are dups of a different but related issue) also reported this as a High.
+
+cc @berndartmueller @lucyoa
+
+**sherlock-admin**
+
+ > Escalate for 2 USDC.
+> 
+> Given the potential impact to different flows/contexts, we still think this is a high-severity impact (not Medium as judged). A majority of the dups (while some are dups of a different but related issue) also reported this as a High.
+> 
+> cc @berndartmueller @lucyoa
+
+You've created a valid escalation for 2 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted
+
+**sherlock-admin**
+
+> Escalation accepted
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue H-11: Lien count per epoch is not updated ultimately locking the collateralized NFT 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/194 
 
@@ -393,7 +769,7 @@ Manual Review
 
 `liensOpenForEpoch` should be incremented when a lien is bought with a duration spilling into an epoch higher than the current one.
 
-# Issue H-8: Purchaser of a lien token may not receive payments 
+# Issue H-12: Purchaser of a lien token may not receive payments 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/193 
 
@@ -428,7 +804,152 @@ Manual Review
 
 `buyoutLien()` should reset `lienData[lienId].payee` to either the zero address or to the new owner.
 
-# Issue H-9: A malicious lien owner can exploit a reentrancy to steal LP funds 
+# Issue H-13: A payment made towards multiple liens causes the borrower to lose funds to the payee 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/190 
+
+## Found by 
+obront, 0xRajeev, zzykxx, Jeiwan
+
+## Summary
+
+A payment made towards multiple liens is entirely consumed for the first one causing the borrower to lose funds to the payee.
+
+## Vulnerability Detail
+
+A borrower can make a bulk payment against multiple liens for a collateral hoping to pay more than one at a time using `makePayment (uint256 collateralId, uint256 paymentAmount)` where the underlying `_makePayment()` loops over the open liens attempting to pay off more than one depending on the `totalCapitalAvailable` provided.
+
+However, the entire `totalCapitalAvailable` is provided via `paymentAmount` in the call to `_payment()` in the first iteration which transfers that completely to the payee in its logic even if it exceeds that `lien.amount`. That total amount is returned as `capitalSpent` which makes the `paymentAmount` for next iteration equal to `0`.
+
+## Impact
+
+Only the first lien is paid off and the entire payment is sent to its payee. The remaining liens remain unpaid. The payment maker (i.e. borrower ) loses funds to the payee.
+
+## Code Snippet
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L387-L389
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L410-L424
+3. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L630-L645
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Add `paymentAmount -= lien.amount` in the `else` block of `_payment()`.
+
+## Discussion
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Clear loss of funds. Should be high
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Clear loss of funds. Should be high
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted
+
+**sherlock-admin**
+
+> Escalation accepted
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue H-14: `LiquidationAccountant.claim()` can be called by anyone causing vault insolvency 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/188 
+
+## Found by 
+TurnipBoy, obront, 0xRajeev, rvierdiiev
+
+## Summary
+
+`LiquidationAccountant.claim()` can be called by anyone to reduce the implied value of a public vault.
+
+## Vulnerability Detail
+
+`LiquidationAccountant.claim()` is called by the `PublicVault` as part of the `processEpoch()` flow. But it has no access control and can be called by anyone and any number of times. If called after `finalAuctionEnd`, one will be able to trigger `decreaseYIntercept()` on the vault even if they cannot affect fund transfer to withdrawing liquidity providers and the PublicVault.
+
+## Impact
+
+This allows anyone to manipulate the `yIntercept` of a public vault by triggering the `claim()` flow after liquidations resulting in vault insolvency.
+
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LiquidationAccountant.sol#L65-L97
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Allow only vault to call `claim()` by requiring authorizations.
+
+## Discussion
+
+**SantiagoGregory**
+
+Our updated LiquidationAccountant implementation (now moved to WithdrawProxy) tracks a hasClaimed bool to make sure claim() is only called once (we also now block claim() from being called until after finalAuctionEnd).
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Abuse can cause vault to implode and cause loss of funds to all depositors. Should be high
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Abuse can cause vault to implode and cause loss of funds to all depositors. Should be high
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+
+Escalation accepted.
+
+
+
+**sherlock-admin**
+
+> 
+> Escalation accepted.
+> 
+> 
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue H-15: A malicious lien owner can exploit a reentrancy to steal LP funds 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/187 
 
@@ -478,28 +999,30 @@ Manual Review
 2. Account for malicious lien token owners via lien buyouts.
 3. Use reentrancy guards.
 
-# Issue H-10: Auctions with remaining liens will always revert causing loss of funds for the highest bidder and stuck collateral 
+# Issue H-16: `VaultImplementation._validateCommitment` may prevent liens that satisfy their terms of `maxPotentialDebt` 
 
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/185 
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/182 
 
 ## Found by 
-0xRajeev
+tives, zzykxx, obront, hansfriese, rvierdiiev, 0xRajeev, Jeiwan
 
 ## Summary
 
-Auctions with remaining liens can never be ended because they will revert.
+The calculation of `potentialDebt` in `VaultImplementation._validateCommitment()` is incorrect and will cause a DoS to legitimate borrowers.
 
 ## Vulnerability Detail
 
-Function `endAuction` will always revert with `NOT_MINTED` error if there are any `liensRemaining` because the value passed to `LIEN_TOKEN.ownerOf` is `i` in the for loop instead of `liensRemaining[i]`.
+The calculation of potentialDebt in `VaultImplementation._validateCommitment()` is incorrect because it computes `uint256 potentialDebt = seniorDebt * (ld.rate + 1) * ld.duration;` which incorrectly adds a factor of `ld.duration` to `seniorDebt` thus making the potential debt much higher by that factor than it will be. The use of `INTEREST_DENOMINATOR` and implied lien rate is also missing here. 
+
 
 ## Impact
 
-Auctions with remaining liens can never be ended leading to loss of funds for the highest bidder and stuck collateral.
- 
+Liens that would have otherwise satisfied the constraint of `potentialDebt <= ld.maxPotentialDebt` will fail because of this miscalculation and will cause a DoS to legitimate borrowers and likely all of them.
+
 ## Code Snippet
 
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L194-L201
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/VaultImplementation.sol#L221-L225
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L256-L262
 
 ## Tool used
 
@@ -507,9 +1030,50 @@ Manual Review
 
 ## Recommendation
 
-Pass `liensRemaining[i]` to `LIEN_TOKEN.ownerOf`.
+Change the calculation to `uint256 potentialDebt = seniorDebt * (ld.rate * ld.duration + 1).mulDivDown(1, INTEREST_DENOMINATOR);`. This should also consider the implied rate of all the liens against the collateral instead of only this lien.
 
-# Issue H-11: A malicious lien buyer can DoS to cause fund loss/lock 
+## Discussion
+
+**secureum**
+
+Escalate for 2 USDC.
+
+Given the potential impact to different flows/contexts, we still think this is a high-severity impact (not Medium as judged). A majority of the dups (4 of 6) also reported this as a High.
+
+cc @berndartmueller @lucyoa
+
+**sherlock-admin**
+
+ > Escalate for 2 USDC.
+> 
+> Given the potential impact to different flows/contexts, we still think this is a high-severity impact (not Medium as judged). A majority of the dups (4 of 6) also reported this as a High.
+> 
+> cc @berndartmueller @lucyoa
+
+You've created a valid escalation for 2 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted.
+
+
+**sherlock-admin**
+
+> Escalation accepted.
+> 
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue H-17: A malicious lien buyer can DoS to cause fund loss/lock 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/181 
 
@@ -548,7 +1112,7 @@ Manual Review
 2. Account for malicious lien token owners via lien buyouts.
 3. Use reentrancy guards.
 
-# Issue H-12: Lien buyout with new terms does not update the slope of public vaults 
+# Issue H-18: Lien buyout with new terms does not update the slope of public vaults 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/180 
 
@@ -584,12 +1148,12 @@ Manual Review
 
 Calculate the slope of the lien before the buyout in the `VautImplementation.buyoutLien` function, subtract the calculated slope value from `PublicVault.slope`, update lien terms, recalculate the slope and add the new updated slope value to `PublicVault.slope`.
 
-# Issue H-13: Auction bid that partially pays back an expired lien will revert 
+# Issue H-19: Auction bid that partially pays back an expired lien will revert 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/179 
 
 ## Found by 
-0xRajeev, Prefix
+Prefix, 0xRajeev, sorrynotsorry
 
 ## Summary
 
@@ -622,7 +1186,74 @@ Manual Review
 
 Revisit the logic that updates `lien.last` in the protocol to ensure no reverts in expected flows.
 
-# Issue H-14: Epochs can be progressed during ongoing auctions to cause LP fund loss and collateral lockup 
+# Issue H-20: Anyone can deposit and mint withdrawal proxy shares to capture distributed yield from borrower interests 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/176 
+
+## Found by 
+bin2chen, 0x4141, 0xRajeev, TurnipBoy
+
+## Summary
+
+Anyone can deposit and mint Withdrawal proxy shares by directly interacting with the base `ERC4626Cloned` contract's functions, allowing them to capture distributed yield from borrower interests.
+
+## Vulnerability Detail
+
+The `WithdrawProxy` contract extends the `ERC4626Cloned` vault contract implementation. The `ERC4626Cloned` contract has the functionality to deposit and mint vault shares. Usually, withdrawal proxy shares are only distributed via the `WithdrawProxy.mint` function, which is only called by the `PublicVault.redeemFutureEpoch `function. Anyone can deposit WETH into a deployed Withdraw proxy to receive shares, wait until assets (WETH) are deposited via the `PublicVault.transferWithdrawReserve` or `LiquidationAccountant.claim` function and then redeem their shares for WETH assets. 
+
+## Impact
+
+By depositing/minting directly to the Withdraw proxy, one can get interest yield on-demand without being an LP and having capital locked for epoch(s). This may potentially be timed in a way to deposit/mint only when we know that interest yields are being paid by a borrower who is not defaulting on their loan. The returns are diluted for the LPs at the expense of someone who directly interacts with the underlying proxy.
+ 
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/ERC4626-Cloned.sol#L305-L339
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L198
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Overwrite the `ERC4626Cloned.afterDeposit` function and revert to prevent public deposits and mints.
+
+## Discussion
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+This leads to material loss of funds. Definitely high risk
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> This leads to material loss of funds. Definitely high risk
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted
+
+**sherlock-admin**
+
+> Escalation accepted
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue H-21: Epochs can be progressed during ongoing auctions to cause LP fund loss and collateral lockup 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/175 
 
@@ -659,7 +1290,7 @@ Manual Review
 
 Revisit the logic to use an appropriate timestamp instead of a fixed duration.
 
-# Issue H-15: Public vault depositors will receive fewer vault shares until the first payment 
+# Issue H-22: Public vault depositors will receive fewer vault shares until the first payment 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/173 
 
@@ -692,7 +1323,7 @@ Manual Review
 
 Revisit the logic behind updating `last` when `yIntercept` and/or `slope` are updated.
 
-# Issue H-16: Payments and liquidations of multiple liens will revert and can be exploited, causing payer fund loss 
+# Issue H-23: Payments and liquidations of multiple liens will revert and can be exploited, causing payer fund loss 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/172 
 
@@ -729,32 +1360,37 @@ Manual Review
 
 Revisit and fix the entire logic that manages positions with the `liens` array addition, traversal and deletion.
 
-# Issue H-17: Incorrect operator in `AstariaRouter.isValidRefinance` can lead to borrower loss and potential liquidation 
+# Issue H-24: Loans can exceed the maximum potential debt leading to vault insolvency and possible loss of LP funds 
 
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/168 
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/169 
 
 ## Found by 
 0xRajeev
 
 ## Summary
 
-Incorrect use of operator `>=` instead of `<=` in `isValidRefinance()` can lead to borrower loss and potential liquidation.
+Missing to account for the new lien can allow loans on a collateral to exceed maximum potential debt leading to vault insolvency and potential loss of LP funds.
 
 ## Vulnerability Detail
 
-The check in `isValidRefinance()` for `newLien.rate >= minNewRate` is incorrect because it allows the new lien's rate of interest to be greater than maximum new rate instead of it being lesser than that value. The calculation of `uint256(lien.rate) - minInterestBPS;` actually gives `maxNewRate` and not `minNewRate`.
+The `LienToken.createLien` function tries to prevent loans and the total potential debt from surpassing the defined `params.terms.maxPotentialDebt` limit. When the `getTotalDebtForCollateralToken` function is called, the new lien (which will be created within this transaction) is not yet added to the `liens[collateralId]` array. However, the `getTotalDebtForCollateralToken` function iterates over this very same array and will return the total debt without considering the new lien being added and for which this check is being performed.
 
 ## Impact
 
-Refinancing is a crucial feature of the protocol to allow a borrower to refinance their loan if a certain minimum improvement of interest rate or duration is offered. This logical error allows a borrower to accidentally refinance or a malicious strategist to intentionally refinance an existing loan to a new one with a worse interest rate, leading to material loss for the borrower and potential liquidation in future.
+The strategist's defined max potential debt limit can be exceeded, which changes/increases the risk for LPs, as it imposes a higher debt to the public vault. This could lead to vault insolvency and loss of LP funds.
 
+PoC: https://gist.github.com/berndartmueller/8b0f870962acc4c999822d742e89151b
+
+Example exploit: Given a public vault and a lien with a max potential debt amount of 50 ETH (that's the default `standardLien` in TestHelpers.t.sol)
+
+    1. 100 ETH have been deposited in the public vault by LPs
+    2. Bob borrows 50 ETH with his 1st NFT -> success
+    3. Bob borrows another 50 ETH with his 2nd NFT -> successful as well even though theirs a limit of 50 ETH 
+    4. Bob now has 100 ETH -> The max potential debt limit is exceeded by 50 ETH
 
 ## Code Snippet
 
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L482-L491
-2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L106
-3. https://docs.astaria.xyz/docs/protocol-mechanics/refinancing
-
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L253-L262
 
 ## Tool used
 
@@ -762,9 +1398,56 @@ Manual Review
 
 ## Recommendation
 
-Change `>=` to `<=` in `newLien.rate >= minNewRate` in the return statement on L488.
+Check the total debt limit after adding the new lien to the `liens[collateralId]` array.
 
-# Issue H-18: Triggering liquidations ahead of expected time leads to loss and lock of funds 
+## Discussion
+
+**androolloyd**
+
+this is working as intended, the value is intended to represent the max potential debt the collateral can potentnially be under at the moment the new terms are originated.
+
+**secureum**
+
+Escalate for 2 USDC.
+
+We still think this is a valid issue with a high-severity impact as described above and demonstrated in the PoC.
+
+cc @berndartmueller @lucyoa 
+
+**sherlock-admin**
+
+ > Escalate for 2 USDC.
+> 
+> We still think this is a valid issue with a high-severity impact as described above and demonstrated in the PoC.
+> 
+> cc @berndartmueller @lucyoa 
+
+You've created a valid escalation for 2 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted
+
+Having the possibility of exceeding the maximum potential debt should be mitigated
+
+**sherlock-admin**
+
+> Escalation accepted
+> 
+> Having the possibility of exceeding the maximum potential debt should be mitigated
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue H-25: Triggering liquidations ahead of expected time leads to loss and lock of funds 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/167 
 
@@ -795,12 +1478,12 @@ Manual Review
 
 Revisit the liquidation logic and its triggering related to the auction window and epoch end.
 
-# Issue H-19: Lack of access control in PublicVault.sol#transferWithdrawReserve let user call transferWithdrawReserve() multiple times to modify withdrawReserve 
+# Issue H-26: Lack of access control in PublicVault.sol#transferWithdrawReserve let user call transferWithdrawReserve() multiple times to modify withdrawReserve 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/163 
 
 ## Found by 
-ctf\_sec
+ctf\_sec, Jeiwan
 
 ## Summary
 
@@ -850,250 +1533,42 @@ We recommend the project add requiestAuth modifier to the function
 
 We can also change the implementation by implmenting: if the underlying withdrawProxy is address(0), revert transfer.
 
-# Issue H-20: AuctionHouse#createBid bid refund logic is wrong when new bid overwrites a existing bid. 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/114 
-
-## Found by 
-ctf\_sec
-
-## Summary
-
-AuctionHouse#createBid bid refund logic is wrong when a new bid overwrites an existing bid.
-
-The new bidder is paying the refund for the old bidder, instead of the current auction contract refund the old bid.
-
-## Vulnerability Detail
-
-The function AuctionHouse.sol#createBid is implemented below:
-
-./lib/astaria-gpl/src/AuctionHouse.sol
-
-https://github.com/AstariaXYZ/astaria-gpl/blob/0e6764f626b704fea23b5ba4c46afd963de298ca/src/AuctionHouse.sol#L94
-
-```solidity
-  function createBid(uint256 tokenId, uint256 amount) external override {
-    address lastBidder = auctions[tokenId].bidder;
-    uint256 currentBid = auctions[tokenId].currentBid;
-    uint256 duration = auctions[tokenId].duration;
-    uint64 firstBidTime = auctions[tokenId].firstBidTime;
-    require(
-      firstBidTime == 0 || block.timestamp < firstBidTime + duration,
-      "Auction expired"
-    );
-    require(
-      amount > currentBid + ((currentBid * minBidIncrementPercentage) / 100),
-      "Must send more than last bid by minBidIncrementPercentage amount"
-    );
-
-    // If this is the first valid bid, we should set the starting time now.
-    // If it's not, then we should refund the last bidder
-    uint256 vaultPayment = (amount - currentBid);
-
-    if (firstBidTime == 0) {
-      auctions[tokenId].firstBidTime = block.timestamp.safeCastTo64();
-    } else if (lastBidder != address(0)) {
-      uint256 lastBidderRefund = amount - vaultPayment;
-      _handleOutGoingPayment(lastBidder, lastBidderRefund);
-    }
-
-    _handleIncomingPayment(tokenId, vaultPayment, address(msg.sender));
-
-    auctions[tokenId].currentBid = amount;
-    auctions[tokenId].bidder = address(msg.sender);
-
-    bool extended = false;
-    // at this point we know that the timestamp is less than start + duration (since the auction would be over, otherwise)
-    // we want to know by how much the timestamp is less than start + duration
-    // if the difference is less than the timeBuffer, increase the duration by the timeBuffer
-    if (firstBidTime + duration - block.timestamp < timeBuffer) {
-      // Playing code golf for gas optimization:
-      // uint256 expectedEnd = auctions[auctionId].firstBidTime.add(auctions[auctionId].duration);
-      // uint256 timeRemaining = expectedEnd.sub(block.timestamp);
-      // uint256 timeToAdd = timeBuffer.sub(timeRemaining);
-      // uint256 newDuration = auctions[auctionId].duration.add(timeToAdd);
-
-      //TODO: add the cap to the duration, do not let it extend beyond 24 hours extra from max duration
-      uint64 newDuration = uint256(
-        duration + (block.timestamp + timeBuffer - firstBidTime)
-      ).safeCastTo64();
-      if (newDuration <= auctions[tokenId].maxDuration) {
-        auctions[tokenId].duration = newDuration;
-      } else {
-        auctions[tokenId].duration =
-          auctions[tokenId].maxDuration -
-          firstBidTime;
-      }
-      extended = true;
-    }
-
-    emit AuctionBid(
-      tokenId,
-      msg.sender,
-      amount,
-      lastBidder == address(0), // firstBid boolean
-      extended
-    );
-
-    if (extended) {
-      emit AuctionDurationExtended(tokenId, auctions[tokenId].duration);
-    }
-  }
-```
-
-Our focus is in the codeblock below
-
-https://github.com/AstariaXYZ/astaria-gpl/blob/0e6764f626b704fea23b5ba4c46afd963de298ca/src/AuctionHouse.sol#L112
-
-```solidity
-    if (firstBidTime == 0) {
-      auctions[tokenId].firstBidTime = block.timestamp.safeCastTo64();
-    } else if (lastBidder != address(0)) {
-      uint256 lastBidderRefund = amount - vaultPayment;
-      _handleOutGoingPayment(lastBidder, lastBidderRefund);
-    }
-```
+## Discussion
 
-What the code doing is that:
+**IAmTurnipBoy**
 
-if the firstBidTime is 0, we set the current firsBidTime, otherwise, we refund the fund to the old bidder.
+Escalate for 1 USDC
 
-however, the crucial function _handleOutGoingPayment(lastBidder, lastBidderRefund) is implemented below
+Invalid. Impossible for withdrawReserve != 0 and there isn't a withdraw proxy, because of the following logic. Anytime there is a liquidation a liquidation accountant is deployed and that ALWAYS deploys a withdraw proxy. If there's no liquidations then there's no withdrawReserves.
 
-https://github.com/AstariaXYZ/astaria-gpl/blob/0e6764f626b704fea23b5ba4c46afd963de298ca/src/AuctionHouse.sol#L307
+**sherlock-admin**
 
-```solidity
-  function _handleOutGoingPayment(address to, uint256 amount) internal {
-    TRANSFER_PROXY.tokenTransferFrom(weth, address(msg.sender), to, amount);
-  }
-```
+ > Escalate for 1 USDC
+> 
+> Invalid. Impossible for withdrawReserve != 0 and there isn't a withdraw proxy, because of the following logic. Anytime there is a liquidation a liquidation accountant is deployed and that ALWAYS deploys a withdraw proxy. If there's no liquidations then there's no withdrawReserves.
 
-and the implement for TRANSFER_PROXY#tokenTransferFrom is 
+You've created a valid escalation for 1 USDC!
 
-```solidity
-  function tokenTransferFrom(
-    address token,
-    address from,
-    address to,
-    uint256 amount
-  ) external requiresAuth {
-    ERC20(token).safeTransferFrom(from, to, amount);
-  }
-```
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
 
-then the _handleOutGoingPayment transfer "amount" of WETH from msg.sender to the address(to).
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
 
-now we revisit the old bid refunding block:
+**Evert0x**
 
-```solidity
-    if (firstBidTime == 0) {
-      auctions[tokenId].firstBidTime = block.timestamp.safeCastTo64();
-    } else if (lastBidder != address(0)) {
-      uint256 lastBidderRefund = amount - vaultPayment;
-      _handleOutGoingPayment(lastBidder, lastBidderRefund);
-    }
-```
+Escalation rejected. There's no hard requirement to always have a liquidation accountant..
 
-if the lastBidder exits, we are letting the current new bidder who is willing to pay the higher price and wants to overwrite the current bid paying the refund for the old bidder because of this line of code:
+**sherlock-admin**
 
-```solidity
-TRANSFER_PROXY.tokenTransferFrom(weth, address(msg.sender), to, amount);
-```
+> Escalation rejected. There's no hard requirement to always have a liquidation accountant..
 
-msg.sender is the current bidder, address(to) is the old bidder.
+This issue's escalations have been rejected!
 
-I believe this logic is not correctly implemented.
+Watsons who escalated this issue will have their escalation amount deducted from their next payout.
 
-The new bidder should not refund the fund to the old bidder, whoever receives the old bidder's fund should refund the old bidder.
 
-In this case, the old bidder's fund is used to either pay for LIEN_TOKEN or transferred to COLLATERAL_TOKEN.ownerOf(tokenId) in _handleIncomingPayment
 
-https://github.com/AstariaXYZ/astaria-gpl/blob/0e6764f626b704fea23b5ba4c46afd963de298ca/src/AuctionHouse.sol#L254
-
-Given the code bock
-
-```solidity
-    if (liens.length > 0) {
-      for (uint256 i = 0; i < liens.length; ++i) {
-        uint256 payment;
-        uint256 lienId = liens[i];
-
-        ILienToken.Lien memory lien = LIEN_TOKEN.getLien(lienId);
-
-        if (transferAmount >= lien.amount) {
-          payment = lien.amount;
-          transferAmount -= payment;
-        } else {
-          payment = transferAmount;
-          transferAmount = 0;
-        }
-
-        if (payment > 0) {
-          LIEN_TOKEN.makePayment(tokenId, payment, lien.position, payer);
-        }
-      }
-    } else {
-      TRANSFER_PROXY.tokenTransferFrom(
-        weth,
-        payer,
-        COLLATERAL_TOKEN.ownerOf(tokenId),
-        transferAmount
-      );
-    }
-```
-
-## Impact
-
-The new bidder is wrongly paying the refund for the old bidder and lose money unexpectedly.
-
-## Code Snippet
-
-https://github.com/AstariaXYZ/astaria-gpl/blob/0e6764f626b704fea23b5ba4c46afd963de298ca/src/AuctionHouse.sol#L307
-
-https://github.com/AstariaXYZ/astaria-gpl/blob/0e6764f626b704fea23b5ba4c46afd963de298ca/src/AuctionHouse.sol#L254
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/TransferProxy.sol#L25-L32
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-We recommend the project refund the old bidder's fund from  LIEN_TOKEN debt position or from the COLLATERAL_TOKEN.ownerOf(tokenId) address instead of letting the new bidder paying the refund.
-
-# Issue H-21: `FlashAction` can be used to re-take a loan against the same collateral 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/109 
-
-## Found by 
-joestakey
-
-## Summary
-Users can use `FlashAction` to take a loan using that same collateral NFT.
-
-## Vulnerability Detail
-`FlashAction` allows the user to unlock their underlying collateral and perform any action with the NFT as long as it is returned within the same block.
-
-The issue is that they can use that NFT to take a new loan:
-
-If the attacker contract implements`receiver.onFlashAction` so that it calls `AstariaRouter.commitToLiens`, this will result in srtarting a new loan, and transferring the NFT to the `COLLATERAL_TOKEN` contract.
-At the end of the call, the [check](https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/CollateralToken.sol#L193-L196) that the NFT is returned will hence pass.
-
-## Impact
-This new loan uses the same collateral as the previous one, meaning the user effectively took this new loan for free
-
-## Code Snippet
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/CollateralToken.sol#L193-L196
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-Consider checking the underlying balance of the vault in `flashAction()`, ensuring it has not changed at the end of the call.
-
-# Issue H-22: Bidder can cheat auction by placing bid much higher than reserve price when there are still open liens against a token 
+# Issue H-27: Bidder can cheat auction by placing bid much higher than reserve price when there are still open liens against a token 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/107 
 
@@ -1171,2160 +1646,7 @@ Manual Review
 
 In `_handleIncomingPayment`, all residual transfer amount should be sent to `COLLATERAL_TOKEN.ownerOf(tokenId)`.
 
-# Issue H-23: AuctionHouse._handleIncomingPayment do not send interest to lien 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/74 
-
-## Found by 
-rvierdiiev
-
-## Summary
-AuctionHouse._handleIncomingPayment do not send interest to lien
-## Vulnerability Detail
-When someone creates bid on auction then `AuctionHouse._handleIncomingPayment` function is called. It then send payments to lien's vaults one by one. 
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L281-L298
-```solidity
-      for (uint256 i = 0; i < liens.length; ++i) {
-        uint256 payment;
-        uint256 lienId = liens[i];
-
-        ILienToken.Lien memory lien = LIEN_TOKEN.getLien(lienId);
-
-        if (transferAmount >= lien.amount) {
-          payment = lien.amount;
-          transferAmount -= payment;
-        } else {
-          payment = transferAmount;
-          transferAmount = 0;
-        }
-
-        if (payment > 0) {
-          LIEN_TOKEN.makePayment(tokenId, payment, lien.position, payer);
-        }
-      }
-```
-
-The problem is that it uses `lien.amount` as value that should be sent as payment to LienToken. But it also should send interests, that were accrued for a lien.
-## Impact
-LienToken owner is underpaid with interests.
-## Code Snippet
-Provided above.
-## Tool used
-
-Manual Review
-
-## Recommendation
-Consider `lien.amount + LIEN_TOKEN.getInterest(lienId)` as full amount for LienToken payment.
-
-# Issue H-24: nlrType type is not signed by strategist, which could allow fraudulent behavior as new types are added 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/72 
-
-## Found by 
-obront
-
-## Summary
-
-The strategist signs the merkle root, their nonce, and the deadline of all strategies to ensure that new borrowers meet their criteria. However, the lien type (`nlrType`) is not signed. Currently, the structs for the different types are unique, so there is no ability to borrow one type as another, but if struct schemas of different types overlap in the future, this will open the door for exploits.
-
-## Vulnerability Detail
-
-When a new lien is requested, the borrower submits a Lien Request, which is filled with the parameters at which they would like to borrow. This is kept honest and aligned with the lenders intent because the merkle root, strategist nonce, and deadline are all signed by the strategist.
-
-Because the merkle root is signed, the borrower must submit lien parameters (`nlrDetails`) that align with one of the strategies that the strategist has chosen to allow (represented as leaves in the merkle tree). The schemas of these signed structs differ depending on the validator being used, which is defined in the `nlrType` parameter.
-
-Currently, each of the validators has a unique schema for their struct. However, if there is an overlap in the schema of the Details struct of multiple validators, where the different parameters represent different values, it opens the door to having a fraudulent lien accepted.
-
-Here's an example of how this might work:
-- Type A has a Details struct with the shape { uint8 version, bool requirementX, IAstariaRouter.LienDetails lien }. 
-- The lender includes in their merkle tree the following { version: 1, requirementX: true, lien: { ... maxAmount: 1 ether ... }
-- Type B has a Details struct with the shape { uint8 version, bool requirementY, IAstariaRouter.LienDetails lien }
-- The lender includes in their merkle tree the following strategy: { version: 1, requirementY: true, lien { ... maxAmount: 1 ether ... }
-- The lender signs a merkle root including both of these strategies
-- A borrower who meets requirementX but not requirementY could submit `lienDetails` with `nlrType = Type A` and send the validation to the wrong strategy validator, thus bypassing the expected checks
-
-## Impact
-
-As more strategy types are added, conflicts in struct schemas could open the door to fraudulent behavior.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L222-L232
-
-Current Details struct schemas:
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/strategies/CollectionValidator.sol#L19-L24
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/strategies/UNI_V3Validator.sol#L21-L31
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/strategies/UniqueValidator.sol#L19-L25
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Include the `nlrType` in the data signed by the strategist. The easiest way to do this would be to pack it in with each leaf when assembling the leaves that will create the merkle tree:
-
-```solidity
-function assembleLeaf(ICollectionValidator.Details memory details, address nlrType)
-  public
-  pure
-  returns (bytes memory)
-{
-  return abi.encode(details, nlrType);
-}
-
-function validateAndParse... {
-  ...
-  leaf = keccak256(assembleLeaf(cd, params.nlrType));
-}
-```
-
-# Issue H-25: LienToken.createLien doesn't check if user should be liquidated and provides new loan 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/66 
-
-## Found by 
-rvierdiiev
-
-## Summary
-`LienToken.createLien` doesn't check if user should be liquidated and provides new loan if auction do not exist for collateral.
-## Vulnerability Detail
-`LienToken.createLien` [relies](https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L244-L246)  on `AuctionHouse` to check if new loan can be added to borrower. It assumes that if auction doesn't exist then user is safe to take new loan.
-
-The problem is that to start auction with token that didn't pay the debt someone should call `AstariaRouter.liquidate` function. If no one did it then auction for the NFT will not exists, and `LienToken.createLien` will create new Lien to user, while he already didn't pay debt and should be liquidated.
-## Impact
-New loan will be paid to user that didn't repay previous lien.
-## Code Snippet
-Provided above
-## Tool used
-
-Manual Review
-
-## Recommendation
-Check if user can be liquidated through all of his liens positions. If not then only proceed with new loan.
-
-# Issue H-26: `PublicVault::strategistUnclaimedShares` can be manipulated 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/63 
-
-## Found by 
-8olidity
-
-## Summary
-`PublicVault::strategistUnclaimedShares` can be manipulated
-## Vulnerability Detail
-This is a very common problem
-`StrategistUnclaimedShares` value is by `convertToShares (fee)`
-
-```solidity
-  function _handleStrategistInterestReward(uint256 lienId, uint256 amount)
-    internal
-    virtual
-    override
-  {
-    if (VAULT_FEE() != uint256(0)) {
-      uint256 interestOwing = LIEN_TOKEN().getInterest(lienId);
-      uint256 x = (amount > interestOwing) ? interestOwing : amount;
-      uint256 fee = x.mulDivDown(VAULT_FEE(), 1000); //VAULT_FEE is a basis point
-      strategistUnclaimedShares += convertToShares(fee);
-    }
-  }
-```
-
-Continue to see `convertToShares`
-
-```solidity
-  function convertToShares(uint256 assets)
-    public
-    view
-    virtual
-    returns (uint256)
-  {
-    uint256 supply = totalSupply(); // Saves an extra SLOAD if totalSupply is non-zero.
-
-    return supply == 0 ? assets : assets.mulDivDown(supply, totalAssets());
-  }
-
-
-  function totalAssets() public view virtual override returns (uint256) {
-    if (last == 0 || yIntercept == 0) {
-      return ERC20(underlying()).balanceOf(address(this));
-    }
-    uint256 delta_t = block.timestamp - last;
-
-    return slope.mulDivDown(delta_t, 1) + yIntercept;
-  }
-  
-```
-The calculation is based on supply and totalassets.
-
-poc
-```solidity
-1. Create a `publicvault` contract
-2. The attacker takes tokens from the open market and sends them to a `publicVault` contract
-3. Since `totalassets()` is calculated based on `balanceof(address(this))`, the value of `totalassets` and `totalsupply` is affected if an attacker sends tokens.
-4. An attacker can make` convertToShares()` return 0
-5. `StrategistUnclaimedShares` not increase
-```
-
-## Impact
-`PublicVault::strategistUnclaimedShares` can be manipulated
-## Code Snippet
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L513-L524
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/ERC4626-Cloned.sol#L392-L401
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L406-L413
-## Tool used
-
-Manual Review
-
-## Recommendation
-Avoid using the balance of the contract itself
-
-# Issue H-27: Auctions can end in epoch after intended, underpaying withdrawers 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/51 
-
-## Found by 
-obront
-
-## Summary
-
-When liens are liquidated, the router checks if the auction will complete in a future epoch and, if it does, sets up a liquidation accountant and other logistics to account for it. However, the check for auction completion does not take into account extended auctions, which can therefore end in an unexpected epoch and cause accounting issues, losing user funds.
-
-## Vulnerability Detail
-
-The liquidate() function performs the following check to determine if it should set up the liquidation to be paid out in a future epoch:
-
-```solidity
-if (PublicVault(owner).timeToEpochEnd() <= COLLATERAL_TOKEN.auctionWindow())
-```
-This function assumes that the auction will only end in a future epoch if the `auctionWindow` (typically set to 2 days) pushes us into the next epoch.
-
-However, auctions can last up to an additional 1 day if bids are made within the final 15 minutes. In these cases, auctions are extended repeatedly, up to a maximum of 1 day.
-
-```solidity
-if (firstBidTime + duration - block.timestamp < timeBuffer) {
-  uint64 newDuration = uint256(
-    duration + (block.timestamp + timeBuffer - firstBidTime)
-  ).safeCastTo64();
-  if (newDuration <= auctions[tokenId].maxDuration) {
-    auctions[tokenId].duration = newDuration;
-  } else {
-    auctions[tokenId].duration =
-      auctions[tokenId].maxDuration -
-      firstBidTime;
-  }
-  extended = true;
-}
-```
-The result is that there are auctions for which accounting is set up for them to end in the current epoch, but will actual end in the next epoch. 
-
-## Impact
-
-Users who withdrew their funds in the current epoch, who are entitled to a share of the auction's proceeds, will not be paid out fairly.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L388-L415
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L127-L146
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Change the check to take the possibility of extension into account:
-
-```solidity
-if (PublicVault(owner).timeToEpochEnd() <= COLLATERAL_TOKEN.auctionWindow() + 1 days)
-```
-
-# Issue H-28: Strategists are paid 10x the vault fee because of a math error 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/49 
-
-## Found by 
-obront
-
-## Summary
-
-Strategists set their vault fee in BPS (x / 10,000), but are paid out as x / 1,000. The result is that strategists will always earn 10x whatever vault fee they set.
-
-## Vulnerability Detail
-
-Whenever any payment is made towards a public vault, `beforePayment()` is called, which calls `_handleStrategistInterestReward()`.
-
-The function is intended to take the amount being paid, adjust by the vault fee to get the fee amount, and convert that amount of value into shares, which are added to `strategistUnclaimedShares`.
-
-```solidity
-function _handleStrategistInterestReward(uint256 lienId, uint256 amount)
-    internal
-    virtual
-    override
-  {
-    if (VAULT_FEE() != uint256(0)) {
-      uint256 interestOwing = LIEN_TOKEN().getInterest(lienId);
-      uint256 x = (amount > interestOwing) ? interestOwing : amount;
-      uint256 fee = x.mulDivDown(VAULT_FEE(), 1000);
-      strategistUnclaimedShares += convertToShares(fee);
-    }
-  }
-```
-Since the vault fee is stored in basis points, to get the vault fee, we should take the amount, multiply it by `VAULT_FEE()` and divide by 10,000. However, we accidentally divide by 1,000, which results in a 10x larger reward for the strategist than intended.
-
-As an example, if the vault fee is intended to be 10%, we would set `VAULT_FEE = 1000`. In that case, for any amount paid off, we would calculate `fee = amount * 1000 / 1000` and the full amount would be considered a fee for the strategist.
-
-## Impact
-
-Strategists will be paid 10x the agreed upon rate for their role, with the cost being borne by users.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L513-L524
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Change the `1000` in the `_handleStrategistInterestReward()` function to `10_000`.
-
-# Issue H-29: Claiming liquidationAccountant will reduce vault y-intercept by more than the correct amount 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/48 
-
-## Found by 
-obront
-
-## Summary
-
-When `claim()` is called on the Liquidation Accountant, it decreases the y-intercept based on the balance of the contract after funds have been distributed, rather than before. The result is that the y-intercept will be decreased more than it should be, siphoning funds from all users.
-
-## Vulnerability Detail
-
-When `LiquidationAccountant.sol:claim()` is called, it uses its `withdrawRatio` to send some portion of its earnings to the `WITHDRAW_PROXY` and the rest to the vault.
-
-After performing these transfers, it updates the vault's y-intercept, decreasing it by the gap between the expected return from the auction, and the reality of how much was sent back to the vault:
-
-```solidity
-PublicVault(VAULT()).decreaseYIntercept(
-  (expected - ERC20(underlying()).balanceOf(address(this))).mulDivDown(
-    1e18 - withdrawRatio,
-    1e18
-  )
-);
-```
-This rebalancing uses the balance of the `liquidationAccountant` to perform its calculation, but it is done after the balance has already been distributed, so it will always be 0.
-
-Looking at an example:
-- `expected = 1 ether` (meaning the y-intercept is currently based on this value)
-- `withdrawRatio = 0` (meaning all funds will go back to the vault)
-- The auction sells for exactly 1 ether
-- 1 ether is therefore sent directly to the vault
-- In this case, the y-intercept should not be updated, as the outcome was equal to the expected outcome
-- However, because the calculation above happens after the funds are distributed, the decrease equals `(expected - 0) * 1e18 / 1e18`, which equals `expected`
-
-That decrease should not happen, and causing problems for the protocol's accounting. For example, when `withdraw()` is called, it uses the y-intercept in its calculation of the `totalAssets()` held by the vault, creating artificially low asset values for a given number of shares.
-
-## Impact
-
-Every time the liquidation accountant is used, the vault's math will be thrown off and user shares will be falsely diluted.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LiquidationAccountant.sol#L62-L97
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-The amount of assets sent to the vault has already been calculated, as we've already sent it. Therefore, rather than the full existing formula, we can simply call:
-
-```solidity
-PublicVault(VAULT()).decreaseYIntercept(expected - balance)
-```
-
-Alternatively, we can move the current code above the block of code that transfers funds out (L73).
-
-# Issue H-30: liquidationAccountant can be claimed multiple times, losing a portion of all vault holders' funds 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/47 
-
-## Found by 
-obront
-
-## Summary
-
-The `claim()` function in LiquidationAccountant.sol does not have any protection to ensure it is only called once. Since it is a public function, any user can call it repeatedly, which will arbitrarily decrease the vault's y-intercept, causing all vault depositors to lose a portion of their funds.
-
-## Vulnerability Detail
-
-The `claim()` function in LiquidationAccountant.sol is intended to be called after an auction is completed. The function does three things:
-- Sends some portion of its balance to the `WITHDRAW_PROXY`
-- Sends the rest of its balance to the vault
-- Adjusts the vault's accounting, decreasing its y-intercept based on the amount of funds sent to the `WITHDRAW_PROXY` instead of the vault
-
-Once the first two actions have been completed, there won't be any additional funds in the contract, so they won't perform any action.
-
-However, the final action will have an impact, even if the `liquidationAccountant` has a balance of zero, because it decreases the y-intercept as follows:
-
-```solidity
-PublicVault(VAULT()).decreaseYIntercept(
-  (expected - ERC20(underlying()).balanceOf(address(this))).mulDivDown(
-    1e18 - withdrawRatio,
-    1e18
-  )
-);
-```
-It uses the expected amount that the auctions should have earned and subtracts the current balance of the `liquidationAccountant`, and then adjusts it by the ratio of what will be sent back to the contract. 
-
-When the balance of the contract is zero (after `claim()` has been called), it will decrease the y-intercept by `expected * (1e18 - withdrawRatio) / 1e18`, which will continue to reduce the y-intercept.
-
-The arbitrary ability for any user to decrease a vault's y-intercept below the correct value risks the funds of all the holders of the vault's token. 
-
-Imagine the following scenario:
-- A user calls `claim()` repeatedly until the y-intercept reaches a very low (but non-zero) number
-- Any future user calls `withdraw()` on the vault with X amount of assets 
-- The `withdraw()` function calls `previewWithdraw()` to determine the number of shares that must be spent to withdraw the given amount of assets
-- `previewWithdraw()` uses the formula `shares = assets * totalSupply() / totalAssets()`
-- `totalAssets()` is calculated as `(slope * (block.timestamp) - last) + yIntercept`
-- With a low y-intercept, this number will be extremely low, resulting in a high number of shares needed to retrieve a small amount of assets
-
-## Impact
-
-A malicious (or accidental) user can cause arbitrary decreases in the y-intercept of a vault once the auction is completed, which will cause all vault depositors to lose a portion of their funds.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LiquidationAccountant.sol#L62-L97
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-- Add an extra variable to LiquidationAccountant.sol with a boolean `claimed`
-- Update this variable after `claim()` has been called
-- Check to ensure `!claimed` at the start of `claim()` to ensure it isn't called more than once
-
-# Issue H-31: liquidationAccountant can be claimed at any time 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/46 
-
-## Found by 
-obront
-
-## Summary
-
-New liquidations are sent to the `liquidationAccountant` with a `finalAuctionTimestamp` value, but the actual value that is passed in is simply the duration of an auction. The `claim()` function uses this value in a require check, so this error will allow it to be called before the auction is complete.
-
-## Vulnerability Detail
-
-When a lien is liquidated, `AstariaRouter.sol:liquidate()` is called. If the lien is set to end in a future epoch, we call `handleNewLiquidation()` on the `liquidationAccountant`.
-
-One of the values passed in this call is the `finalAuctionTimestamp`, which updates the `finalAuctionEnd` variable in the `liquidationAccountant`. This value is then used to protect the `claim()` function from being called too early.
-
-However, when the router calls `handleLiquidationAccountant()`, it passes the duration of an auction rather than the final timestamp:
-
-```solidity
-LiquidationAccountant(accountant).handleNewLiquidation(
-  lien.amount,
-  COLLATERAL_TOKEN.auctionWindow() + 1 days
-);
-```
-As a result, `finalAuctionEnd` will be set to 259200 (3 days). 
-
-When `claim()` is called, it requires the final auction to have ended for the function to be called:
-
-```solidity
-require(
-  block.timestamp > finalAuctionEnd || finalAuctionEnd == uint256(0),
-  "final auction has not ended"
-);
-```
-Because of the error above, `block.timestamp` will always be greater than `finalAuctionEnd`, so this will always be permitted. 
-
-## Impact
-
-Anyone can call `claim()` before an auction has ended. This can cause many problems, but the clearest is that it can ruin the protocol's accounting by decreasing the Y intercept of the vault. 
-
-For example, if `claim()` is called before the auction, the returned value will be 0, so the Y intercept will be decreased as if there was an auction that returned no funds. 
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L407-L410
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LiquidationAccountant.sol#L113-L120
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LiquidationAccountant.sol#L65-L69
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Adjust the call from the router to use the ending timestamp as the argument, rather than the duration:
-
-```solidity
-LiquidationAccountant(accountant).handleNewLiquidation(
-  lien.amount,
-  block.timestamp + COLLATERAL_TOKEN.auctionWindow() + 1 days
-);
-```
-
-# Issue H-32: Incorrect fees will be charged 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/36 
-
-## Found by 
-csanuragjain
-
-## Summary
-If user has provided transferAmount which is greater than all lien.amount combined then initiatorPayment will be incorrect since it is charged on full amount when only partial was used as shown in poc
-
-## Vulnerability Detail
-1. Observe the _handleIncomingPayment function
-2. Lets say transferAmount was 1000
-3. initiatorPayment is calculated on this full transferAmount
-
-```python
-uint256 initiatorPayment = transferAmount.mulDivDown(
-      auction.initiatorFee,
-      100
-    ); 
-```
-
-4. Now all lien are iterated and lien.amount is kept on deducting from transferAmount until all lien are navigated
-
-```python
-if (transferAmount >= lien.amount) {
-          payment = lien.amount;
-          transferAmount -= payment;
-        } else {
-          payment = transferAmount;
-          transferAmount = 0;
-        }
-
-        if (payment > 0) {
-          LIEN_TOKEN.makePayment(tokenId, payment, lien.position, payer);
-        }
-      }
-```
-
-5. Lets say after loop completes the transferAmount is still left as 100 
-6. This means only 400 transferAmount was used but fees was deducted on full amount 500
-
-## Impact
-Excess initiator fees will be deducted which was not required
-
-## Code Snippet
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L276
-
-## Tool used
-Manual Review
-
-## Recommendation
-Calculate the exact amount of transfer amount required for the transaction and calculate the initiator fee based on this amount
-
-# Issue H-33: isValidRefinance checks both conditions instead of one, leading to rejection of valid refinances 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/22 
-
-## Found by 
-obront
-
-## Summary
-
-`isValidRefinance()` is intended to check whether either (a) the loan interest rate decreased sufficiently or (b) the loan duration increased sufficiently. Instead, it requires both of these to be true, leading to the rejection of valid refinances.
-
-## Vulnerability Detail
-
-When trying to buy out a lien from `LienToken.sol:buyoutLien()`, the function calls `AstariaRouter.sol:isValidRefinance()` to check whether the refi terms are valid.
-
-```solidity
-if (!ASTARIA_ROUTER.isValidRefinance(lienData[lienId], ld)) {
-  revert InvalidRefinance();
-}
-```
-
-One of the roles of this function is to check whether the rate decreased by more than 0.5%. From the docs:
-
-> An improvement in terms is considered if either of these conditions is met:
-> - The loan interest rate decrease by more than 0.5%.
-> - The loan duration increases by more than 14 days.
-
-The currently implementation of the code requires both of these conditions to be met:
-
-```solidity
-return (
-    newLien.rate >= minNewRate &&
-    ((block.timestamp + newLien.duration - lien.start - lien.duration) >= minDurationIncrease)
-);
-```
-
-## Impact
-
-Valid refinances that meet one of the two criteria will be rejected.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L488-L490
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Change the AND in the return statement to an OR:
-
-```solidity
-return (
-    newLien.rate >= minNewRate ||
-    ((block.timestamp + newLien.duration - lien.start - lien.duration) >= minDurationIncrease)
-);
-```
-
-## Discussion
-
-**SantiagoGregory**
-
-Independently fixed during our own review so there's no PR specifically for this, but this is now updated to an or.
-
-
-
-# Issue H-34: isValidRefinance will approve invalid refinances and reject valid refinances due to buggy math 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/21 
-
-## Found by 
-obront, hansfriese
-
-## Summary
-
-The math in `isValidRefinance()` checks whether the rate increased rather than decreased, resulting in invalid refinances being approved and valid refinances being rejected.
-
-## Vulnerability Detail
-
-When trying to buy out a lien from `LienToken.sol:buyoutLien()`, the function calls `AstariaRouter.sol:isValidRefinance()` to check whether the refi terms are valid.
-
-```solidity
-if (!ASTARIA_ROUTER.isValidRefinance(lienData[lienId], ld)) {
-  revert InvalidRefinance();
-}
-```
-One of the roles of this function is to check whether the rate decreased by more than 0.5%. From the docs:
-
-> An improvement in terms is considered if either of these conditions is met:
-> - The loan interest rate decrease by more than 0.5%.
-> - The loan duration increases by more than 14 days.
-
-The current implementation of the function does the opposite. It calculates a `minNewRate` (which should be `maxNewRate`) and then checks whether the new rate is greater than that value.
-
-```solidity
-uint256 minNewRate = uint256(lien.rate) - minInterestBPS;
-return (newLien.rate >= minNewRate ...
-```
-
-The result is that if the new rate has increased (or decreased by less than 0.5%), it will be considered valid, but if it has decreased by more than 0.5% (the ideal behavior) it will be rejected as invalid.
-
-## Impact
-
-- Users can perform invalid refinances with the wrong parameters.
-- Users who should be able to perform refinances at better rates will not be able to.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L482-L491
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Flip the logic used to check the rate to the following:
-
-```solidity
-uint256 maxNewRate = uint256(lien.rate) - minInterestBPS;
-return (newLien.rate <= maxNewRate...
-```
-
-# Issue H-35: deposit() and  mint() functions do not work 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/2 
-
-## Found by 
-Bnke0x0
-
-## Summary
-
-## Vulnerability Detail
-
-## Impact
-The `ERC4626-Cloned` contract inherits from the `ERC20Cloned` and `ERC4626Base` contracts. When the user calls the deposit and mint functions of the  `ERC4626-Cloned` contract, the deposit and mint functions of the `ERC20Cloned` or  `ERC4626Base` contracts are called.
-
-The deposit and mint functions of the `ERC20Cloned` or  `ERC4626Base` contracts will call the deposit and mint functions of the `ERC4626-Cloned` contract. The `ERC4626-Cloned` contract inherits from the ERC4626 contract, that is, the deposit and mint functions of the ERC4626 contract will be called.
-
-The deposit and mint functions of the ERC4626 contract will call the safeTransferFrom function. Since the caller is the  `ERC4626-Cloned` contract, msg.sender will be the  `ERC4626-Cloned` contract. And because the user calls the deposit and mint functions of the  `ERC4626-Cloned` contract without transferring tokens to the  `ERC4626-Cloned` contract and approving the call will fail.
-
-## Code Snippet
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/ERC4626-Cloned.sol#L305-L322
-      
-              `  function deposit(uint256 assets, address receiver)
-                 public
-                  virtual
-                  override(IVault)
-                  returns (uint256 shares)
-                {
-                  // Check for rounding error since we round down in previewDeposit.
-                  require((shares = previewDeposit(assets)) != 0, "ZERO_SHARES");
-
-                  // Need to transfer before minting or ERC777s could reenter.
-                  ERC20(underlying()).safeTransferFrom(msg.sender, address(this), assets);
-
-                  _mint(receiver, shares);
-
-                  emit Deposit(msg.sender, receiver, assets, shares);
-
-                  afterDeposit(assets, shares);
-                }`
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/ERC4626-Cloned.sol#L324-L339
-      
-              `   function mint(uint256 shares, address receiver)
-                  public
-                 virtual
-                 returns (uint256 assets)
-               {
-                 assets = previewMint(shares); // No need to check for rounding error, previewMint rounds up.
-
-                 // Need to transfer before minting or ERC777s could reenter.
-                ERC20(underlying()).safeTransferFrom(msg.sender, address(this), assets);
-
-                 _mint(receiver, shares);
-
-                 emit Deposit(msg.sender, receiver, assets, shares);
-
-                 afterDeposit(assets, shares);
-               }`
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-In the deposit and mint functions of the `ERC4626-Cloned` contract, add code for the user to transfer tokens and approve the use of tokens in the Astaria contract.
-
-# Issue M-1: Use safeTransferFrom() instead of transferFrom() for outgoing erc721 transfer 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/293 
-
-## Found by 
-pashov, neila, Bnke0x0, 8olidity, Sm4rty, Rohan16, cryptphi, Nyx, seyni, yixxas, rvierdiiev, peanuts
-
-## Summary
-It is recommended to use safeTransferFrom() instead of transferFrom() when transferring ERC721s out of the vault.
-## Vulnerability Detail
-
-1. The transferFrom() method is used instead of safeTransferFrom(), which I assume is a gas-saving measure. I however argue that this isn’t recommended because:
-- [OpenZeppelin’s documentation](https://docs.openzeppelin.com/contracts/4.x/api/token/erc721#IERC721-transferFrom-address-address-uint256-) discourages the use of transferFrom(); use safeTransferFrom() whenever possible
-- The recipient could have logic in the onERC721Received() function, which is only triggered in the safeTransferFrom() function and not in transferFrom(). A notable example of such contracts is the Sudoswap pair:
-
-## Impact
-While unlikely because the recipient is the function caller, there is the potential loss of NFTs should the recipient is unable to handle the sent ERC721s.
-[IERC721(underlyingAsset).transferFrom(address(this), releaseTo, assetId);](https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/CollateralToken.sol#L223)
-[nft.transferFrom(address(this), address(receiver), tokenId);](https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/CollateralToken.sol#L176)
-## Code Snippet
-
-```solidity
-nft.transferFrom(address(this), address(receiver), tokenId);
- IERC721(underlyingAsset).transferFrom(address(this), releaseTo, assetId);
-```
-## Tool used
-
-Manual Review
-## Recommendation
-Use safeTransferFrom() when sending out the NFT from the vault.
-```solidity 
-- IERC721(_erc721Address).transferFrom(address(this), msg.sender, _id);
-+ IERC721(_erc721Address).safeTransferFrom(address(this), msg.sender, _id);
-```
-Note that the vault would have to inherit the IERC721Receiver contract if the change is applied to Transfer.sol as well.
-
-
-# Issue M-2: Auction still exists even paid off the loan 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/285 
-
-## Found by 
-\_\_141345\_\_
-
-## Summary
-
-The auction will not be cancelled even the loan is paid off. As a result, the collateral will still be liquidated. If the bid is very low, the lenders of other positions of the collateral could have fund loss.
-
-
-## Vulnerability Detail
-
-Consider the following case:
-A collateral is taking 2 different loan, 1 for a private vault with duration of 15 days for $100, 1 for a public vault with duration of 30 days for $1,000. Say after 15 days, the loan is not paid back, it will be liquidated and put on auction.
-
-Now, if the borrower pays back the first loan, but the auction won't be cancelled and still be alive. Then the collateral could be liquidated and the 2nd loan lender could suffer fund loss.
-
-
-## Impact
-
-Some lenders could loss fund they do not deserve.
-
-
-
-## Code Snippet
-
-The auction won't be changed even after paid off the 1st lien token loan.
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L594-L649
-
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Cancel the auction is all the lien token loans are paid off.
-
-
-# Issue M-3: Re-entrancy 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/284 
-
-## Found by 
-0x4141, HonorLt
-
-## Summary
-The protocol does not have safety checks against re-entrancy attacks.
-
-## Vulnerability Detail
-The protocol is quite big and complex and there are many outside interactions with users or other contracts containing callbacks. For example, users can ```flashAction``` their NFTs if they return them in the same transaction. I believe this makes it possible to re-use the same collateral twice. For instance, when the control is given back to the user:
-```solidity
-    require(
-      receiver.onFlashAction(IFlashAction.Underlying(addr, tokenId), data) ==
-        keccak256("FlashAction.onFlashAction"),
-      "flashAction: callback failed"
-    );
-```
-a malicious actor can ```commitToLien``` again (combining with issues that the ```ecrecover``` might be bypassed and a strategist nonce is not invalidated). Because the user already owns the collateral token, the contract will skip the minting and return:
-```solidity
-  function onERC721Received(
-    address operator_,
-    address from_,
-    uint256 tokenId_,
-    bytes calldata data_
-  ) external override returns (bytes4) {
-    uint256 collateralId = msg.sender.computeId(tokenId_);
-
-    (address underlyingAsset, ) = getUnderlying(collateralId);
-    if (underlyingAsset == address(0)) {
-      ...
-    }
-    return IERC721Receiver.onERC721Received.selector;
-  }
-```
-
-## Impact
-I believe it might be possible to reuse the same collateral twice. I was short on time to PoC this and there might be more places where re-entrancy can be exploited. The codebase is just quite complicated to make a sufficient mental model about the intended behavior.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/CollateralToken.sol#L149-L197
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/CollateralToken.sol#L259-L296
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-Add re-entrancy guard to critical functions that contain external interactions.
-
-# Issue M-4: Liquidity providers can lose funds when a withdraw proxy is not set for an epoch 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/277 
-
-## Found by 
-Jeiwan
-
-## Summary
-Liquidity providers can lose funds when a withdraw proxy is not set for an epoch
-## Vulnerability Detail
-The `transferWithdrawReserve` function of `PublicVault` sends withdrawal reserves to a `WithdrawProxy` ([PublicVault.sol#L341](https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L341))
-and subtracts transferred amount from the reserves. However, if a withdraw proxy is not set for an epoch, there's a false positive: `withdrawReserve` is updated but no funds are actually transferred:
-```solidity
-function transferWithdrawReserve() public {
-  // check the available balance to be withdrawn
-  uint256 withdraw = ERC20(underlying()).balanceOf(address(this));
-  emit TransferWithdraw(withdraw, withdrawReserve);
-
-  // prevent transfer of more assets then are available
-  if (withdrawReserve <= withdraw) {
-    withdraw = withdrawReserve;
-    withdrawReserve = 0;
-  } else {
-    withdrawReserve -= withdraw;
-  }
-  emit TransferWithdraw(withdraw, withdrawReserve);
-
-  address currentWithdrawProxy = withdrawProxies[currentEpoch - 1]; //
-  // prevents transfer to a non-existent WithdrawProxy
-  // withdrawProxies are indexed by the epoch where they're deployed
-  if (currentWithdrawProxy != address(0)) { // @audit false positive: transferring is skipped silently
-    ERC20(underlying()).safeTransfer(currentWithdrawProxy, withdraw);
-    emit WithdrawReserveTransferred(withdraw);
-  }
-}
-```
-## Impact
-Liquidity providers might not be able to withdraw liquidity they requested because it wasn't transferred to a WithdrawProxy due to a mistake, yet accounting was updated.
-## Code Snippet
-See Vulnerability Detail
-## Tool used
-Manual Review
-## Recommendation
-Consider reverting in the case when no withdraw proxy is set for the current epoch.
-
-## Discussion
-
-**SantiagoGregory**
-
-We now check that the withdrawProxy for the current epoch (technically previous epoch) exists before transferring.
-
-
-
-# Issue M-5: Auction#reservePrice maybe less than required 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/266 
-
-## Found by 
-bin2chen
-
-## Summary
-Auction#reservePrice without the addition of the initiatorFee, maybe less than required 
-
-## Vulnerability Detail
-The auction will pay a #initiatorFee when paying, but the fee is not added to #reservePrice when creating auction, so when cancel, the price will not enough
-
-## Impact
-can't clear all lienToken
-
-## Code Snippet
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L276
-
-```solidity
-  function _handleIncomingPayment(
-    uint256 tokenId,
-    uint256 transferAmount,
-    address payer
-  ) internal {
-    require(transferAmount > uint256(0), "cannot send nothing");
-    Auction storage auction = auctions[tokenId];
-
-    uint256 initiatorPayment = transferAmount.mulDivDown(
-      auction.initiatorFee,
-      100
-    ); 
-    TRANSFER_PROXY.tokenTransferFrom(
-      weth,
-      payer,
-      auction.initiator,
-      initiatorPayment
-    );
-    transferAmount -= initiatorPayment; /******** pay initiatorFee ********/
-
-```
-## Tool used
-
-Manual Review
-
-## Recommendation
-```solidity
-  function createAuction(
-    uint256 tokenId,
-    uint256 duration,
-    address initiator,
-    uint256 initiatorFee
-  ) external requiresAuth returns (uint256 reserve) {
-    (reserve, ) = LIEN_TOKEN.stopLiens(tokenId);
-
-    Auction storage newAuction = auctions[tokenId];
-    newAuction.duration = duration.safeCastTo64();
--   newAuction.reservePrice = reserve;
-+    newAuction.reservePrice = reserve + reserve.mulDivDown(
-                                                        auction.initiatorFee,
-                                                        100
-                                                    );     
-    newAuction.initiator = initiator;
-    newAuction.initiatorFee = initiatorFee;
-    newAuction.firstBidTime = block.timestamp.safeCastTo64();
-    newAuction.maxDuration = (duration + 1 days).safeCastTo64();
-    newAuction.currentBid = 0;
-
-    emit AuctionCreated(tokenId, duration, reserve);
-  }
-```
-
-# Issue M-6: new loans "max duration" is not restricted 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/264 
-
-## Found by 
-bin2chen
-
-## Summary
-document :
-"
-Epochs
-[PublicVaults](https://docs.astaria.xyz/docs/smart-contracts/PublicVault) operate around a time-based epoch system. An epoch length is defined by the strategist that deploys the [PublicVault](https://docs.astaria.xyz/docs/smart-contracts/PublicVault). The duration of new loans is restricted to not exceed the end of the next epoch. For example, if a [PublicVault](https://docs.astaria.xyz/docs/smart-contracts/PublicVault) is 15 days into a 30-day epoch, new loans must not be longer than 45 days.
-"
-but more than 2 epoch's duration can be added
-
-## Vulnerability Detail
-the max duration is not detected. add success when > next epoch
-
-#AstariaTest#testBasicPublicVaultLoan
-
-```solidity
-  function testBasicPublicVaultLoan() public {
-
-  IAstariaRouter.LienDetails memory standardLien2 =
-    IAstariaRouter.LienDetails({
-      maxAmount: 50 ether,
-      rate: (uint256(1e16) * 150) / (365 days),
-      duration: 50 days,  /****** more then 14 * 2 *******/
-      maxPotentialDebt: 50 ether
-    });    
-
-    _commitToLien({
-      vault: publicVault,
-      strategist: strategistOne,
-      strategistPK: strategistOnePK,
-      tokenContract: tokenContract,
-      tokenId: tokenId,
-      lienDetails: standardLien2, /**** use standardLien2 ****/
-      amount: 10 ether,
-      isFirstLien: true
-    });
-  }
-```
-
-## Impact
-Too long duration
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/VaultImplementation.sol#L209
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-PublicVault#_afterCommitToLien
-```solidity
-  function _afterCommitToLien(uint256 lienId, uint256 amount)
-    internal
-    virtual
-    override
-  {
-    // increment slope for the new lien
-    unchecked {
-      slope += LIEN_TOKEN().calculateSlope(lienId);
-    }
-
-    ILienToken.Lien memory lien = LIEN_TOKEN().getLien(lienId);
-
-    uint256 epoch = Math.ceilDiv(
-      lien.start + lien.duration - START(),
-      EPOCH_LENGTH()
-    ) - 1;
-
-+   require(epoch <= currentEpoch + 1,"epoch max <= currentEpoch + 1");
-
-    liensOpenForEpoch[epoch]++;
-    emit LienOpen(lienId, epoch);
-  }
-
-
-```
-
-# Issue M-7: cancelAuction() can  cancel "the completed Auction" 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/239 
-
-## Found by 
-bin2chen
-
-## Summary
-AuctionHouse#cancelAuction() can  cancel "the completed Auction"
-
-## Vulnerability Detail
-When the auction has ended (time is up), and the bid amount is less than reservePrice, then it still can #cancel(), this does not make sense, after the end of the auction should only #endAuction()
-
-## Impact
-after the end of the auction should cancel
-
-## Code Snippet
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L210
-
-```solidity
-  function cancelAuction(uint256 auctionId, address canceledBy)
-    external
-    requiresAuth
-  {
-    require(
-      auctions[auctionId].currentBid < auctions[auctionId].reservePrice,
-      "cancelAuction: Auction is at or above reserve"
-    );
-  /**** only check price , no check if end ****/
-```
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-require not end
-```solidity
-  function cancelAuction(uint256 auctionId, address canceledBy)
-    external
-    requiresAuth
-  {
-    require(
-      auctions[auctionId].currentBid < auctions[auctionId].reservePrice,
-      "cancelAuction: Auction is at or above reserve"
-    );
-        require(
-      block.timestamp <
-        auctions[auctionId].firstBidTime + auctions[auctionId].duration,
-      "Auction had completed"
-    );
-```
-
-# Issue M-8: LienToken's `calculateSlope` might panic 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/235 
-
-## Found by 
-sorrynotsorry
-
-## Summary
-LienToken's `calculateSlope` might panic
-## Vulnerability Detail
-LienToken's `calculateSlope` returns the computed rate for a specified lien.
-However, the return is not validated against the linen's being active and the `last` value.
-
-The function is as below;
-```solidity
-  function calculateSlope(uint256 lienId) public view returns (uint256) {
-    Lien memory lien = lienData[lienId];
-    uint256 end = (lien.start + lien.duration);
-    uint256 owedAtEnd = _getOwed(lien, end);
-    return (owedAtEnd - lien.amount).mulDivDown(1, end - lien.last);
-  }
-```
-[Permalink](https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L440-L445)
-
-If the lien is not active and the payout is executed at the `end` of the lien then `(end - lien.last)` will be 0 causing the function to panic.
-
-
-## Impact
-Incorrect accounting
-## Code Snippet
-```solidity
-  function calculateSlope(uint256 lienId) public view returns (uint256) {
-    Lien memory lien = lienData[lienId];
-    uint256 end = (lien.start + lien.duration);
-    uint256 owedAtEnd = _getOwed(lien, end);
-    return (owedAtEnd - lien.amount).mulDivDown(1, end - lien.last);
-  }
-```
-[Permalink](https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L440-L445)
-## Tool used
-
-Manual Review
-
-## Recommendation
-Validate accordingly;
-
-```solidity
-  function calculateSlope(uint256 lienId) public view returns (uint256) {
-    Lien memory lien = lienData[lienId];
-    require(lien.active,"err");
-    uint256 end = (lien.start + lien.duration);
-    require(end != lien.last,"err");
-    uint256 owedAtEnd = _getOwed(lien, end);
-    return (owedAtEnd - lien.amount).mulDivDown(1, end - lien.last);
-  }
-```
-
-# Issue M-9: _deleteLienPosition can be called by anyone to delete any lien they wish 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/233 
-
-## Found by 
-obront, 0x0, tives, TurnipBoy, ctf\_sec, zzykxx, yixxas
-
-## Summary
-
-`_deleteLienPosition` is a public function that doesn't check the caller. This allows anyone to call it an remove whatever lien they wish from whatever collateral they wish
-
-## Vulnerability Detail
-
-    function _deleteLienPosition(uint256 collateralId, uint256 position) public {
-      uint256[] storage stack = liens[collateralId];
-      require(position < stack.length, "index out of bounds");
-
-      emit RemoveLien(
-        stack[position],
-        lienData[stack[position]].collateralId,
-        lienData[stack[position]].position
-      );
-      for (uint256 i = position; i < stack.length - 1; i++) {
-        stack[i] = stack[i + 1];
-      }
-      stack.pop();
-    }
-
-`_deleteLienPosition` is a `public` function and doesn't validate that it's being called by any permissioned account. The result is that anyone can call it to delete any lien that they want. It wouldn't remove the lien data but it would remove it from the array associated with `collateralId`, which would allow it to pass the `CollateralToken.sol#releaseCheck` and the underlying to be withdrawn by the user. 
-
-## Impact
-
-All liens can be deleted completely rugging lenders
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L651-L664
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Change `_deleteLienPosition` to `internal` rather than `public`.
-
-# Issue M-10: `commitToLiens` always reverts 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/204 
-
-## Found by 
-0xRajeev, bin2chen, HonorLt, Jeiwan, rvierdiiev
-
-## Summary
-
-The function `commitToLiens()` always reverts at the call to `_returnCollateral()` which prevents borrowers from depositing collateral and requesting loans in the protocol.
-
-## Vulnerability Detail
-
-The collateral token with `collateralId` is already minted directly to the caller (i.e. borrower) in `commitToLiens()` at the call to `_transferAndDepositAsset()` function. That's because while executing `_transferAndDepositAsset` the NFT is transferred to `COLLATERAL_TOKEN` whose `onERC721Received` mints the token with `collateralId` to borrower (`from` address) and not the `operator_` (i.e. `AstariaRouter`) because `operator_ != from_`.
-
-However, the call to `_returnCollateral()` in `commitToLiens()` incorrectly assumes that this has been minted to the operator and attempts to transfer it to the borrower which will revert because the `collateralId` is not owned by  `AstariaRouter` as it has already been transferred/minted to the borrower.
-
-## Impact
-
-The function `commitToLiens()` always reverts, preventing borrowers from depositing collateral and requesting loans in the protocol, thereby failing to bootstrap its core NFT lending functionality.
-
-## Code Snippet
-
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L244-L274
-2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L578-L587
-3. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/CollateralToken.sol#L282-L284
-4. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L589-L591
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-Remove the call to `_returnCollateral()` in `commitToLiens()`.
-
-# Issue M-11: Canceling an auction does not refund the current highest bidder 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/202 
-
-## Found by 
-0xRajeev, Prefix, neila, bin2chen, csanuragjain, hansfriese, chainNue, TurnipBoy, minhquanym, Jeiwan, peanuts
-
-## Summary
-
-If the collateral token owner cancels the active auction and repays outstanding debt, the current highest bidder will not be refunded and loses their funds.
-
-## Vulnerability Detail
-
-The `AuctionHouse.createBid()` function refunds the previous bidder if there is one. The same logic would also be necessary in the `AuctionHouse.cancelAuction()` function but is missing.
-
-## Impact
-If the collateral token owner cancels the active auction and repays outstanding debt (`reservePrice`), the current highest bidder will not be refunded and will therefore lose their funds which can also be exploited by a malicious borrower.
-
-Potential exploit scenario: A malicious borrower can let the loan expire without repayment, trigger an auction, let bids below reserve price, and (hope to) front-run any bid >= reserve price to cancel the auction which effectively lets the highest bidder pay out (most of) the liens instead of the borrower.
-
-## Code Snippet
-
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L113-L116
-2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L210-L224
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Add the refund logic (via `_handleOutGoingPayment()` to the current bidder) in the cancel auction flow similar to the create bid auction flow.
-
-# Issue M-12: Extension logic incorrectly extends the auction by an additional amount of existing duration 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/201 
-
-## Found by 
-0xRajeev, Prefix, bin2chen, minhquanym, yixxas
-
-## Summary
-
-Incorrect auction extension logic extends the auction by an additional amount of the previous duration instead of extending it by 15 minutes.
-
-## Vulnerability Detail
-
-The calculation of `newDuration` incorrectly adds `duration` in the auction extension logic. This causes the new duration to be extended by an additional amount of the existing duration, instead of an additional 15 minutes (`timeBuffer`), when a bid is created in the last 15 mins of the existing auction duration.
-
-## Impact
-
-Delayed payout of funds/collateral upon auction completion only after the newly extended duration.
-
-## Code Snippet
-
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L135-L137
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Change the calculation to `uint64 newDuration = uint256(block.timestamp + timeBuffer - firstBidTime).safeCastTo64();`
-
-# Issue M-13: Public vaults can become insolvent because of missing `yIntercept` update 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/197 
-
-## Found by 
-zzykxx, 0xRajeev
-
-## Summary
-
-The deduction of `yIntercept` during payments is missing in `beforePayment()` which can lead to vault insolvency.
-
-## Vulnerability Detail
-
-`yIntercept` is declared as "sum of all LienToken amounts" and documented elsewhere as "yIntercept (virtual assets) of a PublicVault". It is used to calculate the total assets of a public vault as: `slope.mulDivDown(delta_t, 1) + yIntercept`.
-
-It is expected to be updated on deposits, payments, withdrawals, liquidations. However, the deduction of `yIntercept` during payments is missing in `beforePayment()`. As noted in the function's Natspec:
-```solidity
- /**
-   * @notice Hook to update the slope and yIntercept of the PublicVault on payment.
-   * The rate for the LienToken is subtracted from the total slope of the PublicVault, and recalculated in afterPayment().
-   * @param lienId The ID of the lien.
-   * @param amount The amount paid off to deduct from the yIntercept of the PublicVault.
-   */
-```
-the amount of payment should be deducted from `yIntercept` but is missing. 
-
-## Impact
-
-PoC: https://gist.github.com/berndartmueller/477cc1026d3fe3e226795a34bb8a903a
-
-This missing update will inflate the inferred value of the public vault corresponding to its actual value leading to eventual insolvency because of resulting protocol miscalculations.
-
-## Code Snippet
-
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L427-L442
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Update `yIntercept` in `beforePayment()` by the `amount` value.
-
-## Discussion
-
-**androolloyd**
-
-tagging @SantiagoGregory but i believe this is a documentation error, will address
-
-
-
-# Issue M-14: `LienToken.buyoutLien` will always revert 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/196 
-
-## Found by 
-0xRajeev, supernova, neila, yixxas, 8olidity, ctf\_sec, zzykxx, cccz, rvierdiiev
-
-## Summary
-
-`buyoutLien()` will always revert, preventing the borrower from refinancing.
-
-## Vulnerability Detail
-
-`buyoutFeeDenominator` is `0` without a setter which will cause `getBuyoutFee()` to revert in the `buyoutLien()` flow. 
-
-## Impact
-
-Refinancing is a crucial feature of the protocol to allow a borrower to refinance their loan if a certain minimum improvement of interest rate or duration is offered. The reverting `buyoutLien()` flow will prevent the borrower from refinancing and effectively lead to loss of their funds due to lock-in into currently held loans when better terms are available.
-
-## Code Snippet
-
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L71
-2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L456
-3. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L377
-4. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L132
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Initialize the buyout fee numerator and denominator in `AstariaRouter` and add their setters to `file()`.
-
-# Issue M-15: `LienToken.createLien` may prevent liens that satisfy their terms of `maxPotentialDebt` 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/192 
-
-## Found by 
-0xRajeev, hansfriese
-
-## Summary
-
-The `potentialDebt` calculation in `createLien` is incorrect.
-
-## Vulnerability Detail
-
-The calculated `potentialDebt` is effectively `(impliedRate + totalDebt) * params.terms.duration` because `getImpliedRate()` returns `impliedRate = impliedRate.mulDivDown(1, totalDebt);`. The calculated `potentialDebt` because of multiplying `totalDebt` by duration is significantly higher than it actually is and so will fail the `params.terms.maxPotentialDebt` check and revert. 
-
-## Impact
-
-This will cause DoS on valid lien creation.
-
-## Code Snippet
-
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L256-L260
-2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L526
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Have `getImpliedRate()` *not* do `impliedRate = impliedRate.mulDivDown(1, totalDebt);` and calculate `potentialDebt` as `totalDebt * (1 + impliedRate *  params.terms.duration * mulDivDown(1, INTEREST_DENOMINATOR)`.
-
-# Issue M-16: A payment made towards multiple liens causes the borrower to lose funds to the payee 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/190 
-
-## Found by 
-obront, 0xRajeev, TurnipBoy, Jeiwan, zzykxx
-
-## Summary
-
-A payment made towards multiple liens is entirely consumed for the first one causing the borrower to lose funds to the payee.
-
-## Vulnerability Detail
-
-A borrower can make a bulk payment against multiple liens for a collateral hoping to pay more than one at a time using `makePayment (uint256 collateralId, uint256 paymentAmount)` where the underlying `_makePayment()` loops over the open liens attempting to pay off more than one depending on the `totalCapitalAvailable` provided.
-
-However, the entire `totalCapitalAvailable` is provided via `paymentAmount` in the call to `_payment()` in the first iteration which transfers that completely to the payee in its logic even if it exceeds that `lien.amount`. That total amount is returned as `capitalSpent` which makes the `paymentAmount` for next iteration equal to `0`.
-
-## Impact
-
-Only the first lien is paid off and the entire payment is sent to its payee. The remaining liens remain unpaid. The payment maker (i.e. borrower ) loses funds to the payee.
-
-## Code Snippet
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L387-L389
-2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L410-L424
-3. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L630-L645
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Add `paymentAmount -= lien.amount` in the `else` block of `_payment()`.
-
-# Issue M-17: Incorrect `LienToken.changeInSlope` calculation can lead to vault insolvency 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/189 
-
-## Found by 
-0xRajeev, hansfriese
-
-## Summary
-
-The calculation of `newSlope` in `changeInSlope()` is incorrect which can lead to vault insolvency.
-
-## Vulnerability Detail
-
-Contrary to the `changeInSlope` function, the `calculateSlope` function uses the `_getOwed` function to calculate the owed amount (incl. the interest). The interest is calculated with the `_getInterest` function. This function takes care of the `lien.last` and also if a lien is expired already. This logic is completely missing in the `changeInSlope` for the `newSlope` calculation which makes it incorrect. Also, very importantly, in the `changeInSlope` function, the `INTEREST_DENOMINATOR` is missing which makes the value inflated causing an underflow error in the last line of `changeInSlope` function: `slope = oldSlope - newSlope`;. `oldslope`, which accounts for the `INTEREST_DENOMINATOR`, is less than `newSlope`.
-
-## Impact
-
-The incorrect `changeInSlope()` calculation can lead to reverts and vault insolvency because users cannot determine the implicit value of vaults while interacting with it as borrowers or lenders.
-
-## Code Snippet
-
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L453-L469
-2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L440-L445
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Make `changeInSlope()` consistent with `calculateSlope()` by implementing a separate helper function to calculate the interest accounting for all the parameters and reusing it in both places.
-
-# Issue M-18: `LiquidationAccountant.claim()` can be called by anyone causing vault insolvency 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/188 
-
-## Found by 
-0xRajeev, TurnipBoy
-
-## Summary
-
-`LiquidationAccountant.claim()` can be called by anyone to reduce the implied value of a public vault.
-
-## Vulnerability Detail
-
-`LiquidationAccountant.claim()` is called by the `PublicVault` as part of the `processEpoch()` flow. But it has no access control and can be called by anyone and any number of times. If called after `finalAuctionEnd`, one will be able to trigger `decreaseYIntercept()` on the vault even if they cannot affect fund transfer to withdrawing liquidity providers and the PublicVault.
-
-## Impact
-
-This allows anyone to manipulate the `yIntercept` of a public vault by triggering the `claim()` flow after liquidations resulting in vault insolvency.
-
-## Code Snippet
-
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LiquidationAccountant.sol#L65-L97
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Allow only vault to call `claim()` by requiring authorizations.
-
-## Discussion
-
-**SantiagoGregory**
-
-Our updated LiquidationAccountant implementation (now moved to WithdrawProxy) tracks a hasClaimed bool to make sure claim() is only called once (we also now block claim() from being called until after finalAuctionEnd).
-
-
-
-# Issue M-19: Auctions run for less time than intended 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/186 
-
-## Found by 
-obront, 0xRajeev, csanuragjain, hansfriese, chainNue, peanuts
-
-## Summary
-
-Auctions run for less time than intended causing them to be not economically efficient for the lenders, thus causing a suboptimal credit of liquidation funds to them.
-
-## Vulnerability Detail
-
-From the documentation/comments, we can infer that `firstBidTime` is supposed to be `// The time of the first bid` and duration is supposed to be `// The length of time to run the auction for, after the first bid was made.`
-
-However, when an auction is created in `createAuction()`, the auction's `firstBidTime` is incorrectly initialized as `block.timestamp.safeCastTo64()` instead of `0`. This is premature initialization because the auction was only created here and no bid has been made yet via `createBid()`. The code in `createBid()` which check for `firstBidTime == 0 `is more evidence that the initialization in `createAuction()` is incorrect.
-
-## Impact
-
-This causes auctions to run for less time than intended if the first bid comes at a much later time after the auction was created. A shorter auction time could potentially allow fewer bids and cause it to be not economically efficient for the lenders, thus causing a suboptimal credit of liquidation funds to them.
-
-## Code Snippet
-
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/interfaces/IAuctionHouse.sol#L12-L13
-2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L80
-3. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L166-L176
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-`createAuction()` should initialize `firstBidTime = 0`.
-
-## Discussion
-
-**androolloyd**
-
-will fix but its a convention issue we want auctions to start immediately not on first bid
-
-
-
-# Issue M-20: `VaultImplementation._validateCommitment` may prevent liens that satisfy their terms of `maxPotentialDebt` 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/182 
-
-## Found by 
-obront, 0xRajeev, hansfriese, tives, Jeiwan, zzykxx, rvierdiiev
-
-## Summary
-
-The calculation of `potentialDebt` in `VaultImplementation._validateCommitment()` is incorrect and will cause a DoS to legitimate borrowers.
-
-## Vulnerability Detail
-
-The calculation of potentialDebt in `VaultImplementation._validateCommitment()` is incorrect because it computes `uint256 potentialDebt = seniorDebt * (ld.rate + 1) * ld.duration;` which incorrectly adds a factor of `ld.duration` to `seniorDebt` thus making the potential debt much higher by that factor than it will be. The use of `INTEREST_DENOMINATOR` and implied lien rate is also missing here. 
-
-
-## Impact
-
-Liens that would have otherwise satisfied the constraint of `potentialDebt <= ld.maxPotentialDebt` will fail because of this miscalculation and will cause a DoS to legitimate borrowers and likely all of them.
-
-## Code Snippet
-
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/VaultImplementation.sol#L221-L225
-2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L256-L262
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Change the calculation to `uint256 potentialDebt = seniorDebt * (ld.rate * ld.duration + 1).mulDivDown(1, INTEREST_DENOMINATOR);`. This should also consider the implied rate of all the liens against the collateral instead of only this lien.
-
-# Issue M-21: Anyone can deposit and mint withdrawal proxy shares to capture distributed yield from borrower interests 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/176 
-
-## Found by 
-0xRajeev, TurnipBoy, bin2chen
-
-## Summary
-
-Anyone can deposit and mint Withdrawal proxy shares by directly interacting with the base `ERC4626Cloned` contract's functions, allowing them to capture distributed yield from borrower interests.
-
-## Vulnerability Detail
-
-The `WithdrawProxy` contract extends the `ERC4626Cloned` vault contract implementation. The `ERC4626Cloned` contract has the functionality to deposit and mint vault shares. Usually, withdrawal proxy shares are only distributed via the `WithdrawProxy.mint` function, which is only called by the `PublicVault.redeemFutureEpoch `function. Anyone can deposit WETH into a deployed Withdraw proxy to receive shares, wait until assets (WETH) are deposited via the `PublicVault.transferWithdrawReserve` or `LiquidationAccountant.claim` function and then redeem their shares for WETH assets. 
-
-## Impact
-
-By depositing/minting directly to the Withdraw proxy, one can get interest yield on-demand without being an LP and having capital locked for epoch(s). This may potentially be timed in a way to deposit/mint only when we know that interest yields are being paid by a borrower who is not defaulting on their loan. The returns are diluted for the LPs at the expense of someone who directly interacts with the underlying proxy.
- 
-## Code Snippet
-
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/ERC4626-Cloned.sol#L305-L339
-2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L198
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Overwrite the `ERC4626Cloned.afterDeposit` function and revert to prevent public deposits and mints.
-
-# Issue M-22: Minting public vault shares while the protocol is paused can lead to LP fund loss 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/174 
-
-## Found by 
-0xRajeev
-
-## Summary
-
-Assets can be deposited into public vaults by LPs with `PublicVault.mint` function to bypass a possible paused protocol.
-
-## Vulnerability Detail
-
-The PublicVault contract prevents calls to the `PublicVault.deposit` function while the protocol is paused by using the `whenNotPaused` modifier.
-
-The `PublicVault` contract extends the `ERC4626Cloned` contract, which has two functions to deposit assets into the vault: the `deposit` function and the `mint` function. The latter function, however, is not overwritten in the PublicVault contract and therefore lacks the appropriate `whenNotPaused` modifier. 
-
-## Impact
-
-LPs can deposit assets into public vaults with the `PublicVault.mint` function to bypass a possible paused protocol. This can lead to LP fund loss depending on the reason for the protocol pause and the incident response.
- 
-## Code Snippet
-
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L222
-2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/ERC4626-Cloned.sol#L324
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Override the mint function and add the `whenNotPaused` modifier
-
-# Issue M-23: Buyouts of shorter duration liens can lead to the loss of borrower funds 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/171 
-
-## Found by 
-0xRajeev
-
-## Summary
-
-Liens whose duration is equal to (or maybe less than) `minDurationIncrease` cannot be bought out to be replaced by newer liens with lower interest rates but the same duration. This locks the borrower out of better-termed liens, effectively resulting in the loss of their funds 
- 
-## Vulnerability Detail
-
-Liens whose duration is equal to (or maybe less than) `minDurationIncrease` cannot be bought out to be replaced by newer liens with lower interest rates but the exact duration because it results in an underflow in `_getRemainingInterest()`.
-
-Example scenario: if the strategy`liendetails.duration` is <= 14 days, then it's impossible to do a buyout of a new lien because the implemented check requires to wait `minDurationIncrease`, which is set to 14 days. However, if the buyer waits 14 days, the lien is expired, which triggers the earlier mentioned underflow.
-
-## Impact
-
-The borrower gets locked out of better-termed liens, effectively resulting in the loss of their funds because of extra interest paid on older liens.
- 
-## Code Snippet
-
-1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L573
-2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L489-L490
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Revisit the checking logic and minimum duration as it applies to shorter-duration loans.
-
-## Discussion
-
-**SantiagoGregory**
-
-We updated buyoutLien() to check for a lower interest rate *or* higher duration.
-
-
-
-# Issue M-24: Loan duration can exceed the end of the next epoch 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/170 
-
-## Found by 
-0xRajeev
-
-## Summary
-
-Loan duration can exceed the end of the next epoch, which deviates from the protocol specification.
-
-## Vulnerability Detail
-
-From the specs: "The duration of new loans is restricted to not exceed the end of the next epoch. For example, if a PublicVault is 15 days into a 30-day epoch, new loans must not be longer than 45 days."
-
-However, there's no enforcement of this requirement. 
-
-## Impact
-
-The implementation does not adhere to the spec: Loan duration can exceed the end of the next epoch, which breaks protocol specification and therefore lead to miscalculations and potential fund loss.
-
-
-## Code Snippet
-
-1. https://docs.astaria.xyz/docs/protocol-mechanics/epochs
-2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/VaultImplementation.sol#L146-L228
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Implement as per specification or revisit the specification.
-
-# Issue M-25: `auctionExists()` is implemented in an unreliable way as an auction can exist but fail the check 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/164 
-
-## Found by 
-yixxas
-
-## Summary
-`auctionExists()` checks if an auction exist by checking if `auctions[tokenId].initiator != address(0)`. This is problematic as an auction can be created with `auctions[tokenId].initiator = address(0)` which bypasses this check.
-
-## Vulnerability Detail
-`auctionExists()` is used multiple times in both `CollateralToken.sol` and `LienToken.sol`. It is important that the function returns an accurate result. For example, `createLien()` can only be called if an auction exist, but in the case when `auctions[tokenId].initiator == address(0)`, this will revert even though auction is already created.
-
-## Impact
-Multiple parts of the protocol will not be able to function due to a wrong return result from `auctionExists()`.
-
-## Code Snippet
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L67-L85
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L318-L321
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-To fix this, we can either ensure that `initiator` cannot be the 0 address, or we can use a more reliable check - `auctions[tokenId].firstBidTime != 0`, since `firstBidTime` is always set to `block.timestamp`.
-
-However, I recommend that both of these are implemented as `initiator` should not be the 0 address as mentioned in my other issue #8.
-
-# Issue M-26: First ERC4626 deposit can break share calculation 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/143 
-
-## Found by 
-pashov, rvierdiiev, neila, joestakey, ctf\_sec, \_\_141345\_\_, Jeiwan, ak1, 0xNazgul
-
-## Summary
-The first depositor of an ERC4626 vault can maliciously manipulate the share price by depositing the lowest possible amount (1 wei) of liquidity and then artificially inflating ERC4626.totalAssets.
-
-This can inflate the base share price as high as 1:1e18 early on, which force all subsequence deposit to use this share price as a base and worst case, due to rounding down, if this malicious initial deposit front-run someone else depositing, this depositor will receive 0 shares and lost his deposited assets.
-
-## Vulnerability Detail
-Given a vault with DAI as the underlying asset:
-
-Alice (attacker) deposits initial liquidity of 1 wei DAI via `deposit()`
-Alice receives 1e18 (1 wei) vault shares
-Alice transfers 1 ether of DAI via transfer() to the vault to artificially inflate the asset balance without minting new shares. The asset balance is now 1 ether + 1 wei DAI -> vault share price is now very high (= 1000000000000000000001 wei ~ 1000 * 1e18)
-Bob (victim) deposits 100 ether DAI
-Bob receives 0 shares
-Bob receives 0 shares due to a precision issue. His deposited funds are lost.
-
-The shares are calculated as following 
-`return supply == 0 ? assets : assets.mulDivDown(supply, totalAssets());`
-In case of a very high share price, due to totalAssets() > assets * supply, shares will be 0.
-## Impact
-`ERC4626` vault share price can be maliciously inflated on the initial deposit, leading to the next depositor losing assets due to precision issues.
-## Code Snippet
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/ERC4626-Cloned.sol#L392
-## Tool used
-
-Manual Review
-
-## Recommendation
-This is a well-known issue, Uniswap and other protocols had similar issues when supply == 0.
-
-For the first deposit, mint a fixed amount of shares, e.g. 10**decimals()
-```jsx
-if (supply == 0) {
-    return 10**decimals; 
-} else {
-    return assets.mulDivDown(supply, totalAssets());
-}
-```
-
-# Issue M-27: LiquidityProvider can also lend to PrivateVault 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/141 
-
-## Found by 
-neila
-
-## Summary
-Insufficient access control for lending to PublicVault
-found by [yawn-c111](https://github.com/yawn-c111)
-
-## Vulnerability Detail
-Docs says as follows
-https://docs.astaria.xyz/docs/intro
-> Any strategists may provide their own capital to fund these loans through their own `PrivateVaults`, and whitelisted strategists can deploy `PublicVaults` that accept funds from other liquidity providers.
-
-However, Liquidity Providers can also lend to `PrivateVault`.
-
-This is because `lendToVault` function is controlled by `mapping(address => address) public vaults`, which are managed by `_newVault` function and include `PrivateVault`s
-
-This leads to unexpected atttack.
-
-## Impact 
-Unexpected liquidity providers can lend to private vaults
-
-## Code Snippet
-https://github.com/unchain-dev/2022-10-astaria-UNCHAIN/blob/main/src/AstariaRouter.sol#L324
-
-```solidity
-function lendToVault(IVault vault, uint256 amount) external whenNotPaused {
-    TRANSFER_PROXY.tokenTransferFrom(
-      address(WETH),
-      address(msg.sender),
-      address(this),
-      amount
-    );
-
-    require(
-      vaults[address(vault)] != address(0),
-      "lendToVault: vault doesn't exist"
-    );
-    WETH.safeApprove(address(vault), amount);
-    vault.deposit(amount, address(msg.sender));
-  }
-```
-
-https://github.com/unchain-dev/2022-10-astaria-UNCHAIN/blob/main/src/AstariaRouter.sol#L500
-
-```solidity
-function _newVault(
-    uint256 epochLength,
-    address delegate,
-    uint256 vaultFee
-  ) internal returns (address) {
-    uint8 vaultType;
-
-    address implementation;
-    if (epochLength > uint256(0)) {
-      require(
-        epochLength >= minEpochLength && epochLength <= maxEpochLength,
-        "epochLength must be greater than or equal to MIN_EPOCH_LENGTH and less than MAX_EPOCH_LENGTH"
-      );
-      implementation = VAULT_IMPLEMENTATION;
-      vaultType = uint8(VaultType.PUBLIC);
-    } else {
-      implementation = SOLO_IMPLEMENTATION;
-      vaultType = uint8(VaultType.SOLO);
-    }
-
-    //immutable data
-    address vaultAddr = ClonesWithImmutableArgs.clone(
-      implementation,
-      abi.encodePacked(
-        address(msg.sender),
-        address(WETH),
-        address(COLLATERAL_TOKEN),
-        address(this),
-        address(COLLATERAL_TOKEN.AUCTION_HOUSE()),
-        block.timestamp,
-        epochLength,
-        vaultType,
-        vaultFee
-      )
-    );
-
-    //mutable data
-    VaultImplementation(vaultAddr).init(
-      VaultImplementation.InitParams(delegate)
-    );
-
-    vaults[vaultAddr] = msg.sender;
-
-    emit NewVault(msg.sender, vaultAddr);
-
-    return vaultAddr;
-  }
-```
-
-## Tool used
-Manual Review
-
-## Recommendation
-create requirement to lend to only PublicVaults.
-
-# Issue M-28: Can't call this function before epoch ended 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/136 
-
-## Found by 
-neila
-
-## Summary
-Can't call this function before epoch ended
-found by [Tomosuke0930](https://github.com/Tomosuke0930)
-
-## Vulnerability Detail
-The comment says as follows
-https://github.com/unchain-dev/2022-10-astaria-UNCHAIN/blob/main/src/PublicVault.sol#L236-L238
-```solidity
-/**
-  * @notice Rotate epoch boundary. This must be called before the next epoch can begin.
-*/
-```
-However, this function can call the after `currentEpoch` ended
-```solidity
-require(getEpochEnd(currentEpoch)  < block.timestamp, "Epoch has not ended");
-```
-## Impact
-If the `currentEpoch` is 3.
-`getEpochEnd(currentEpoch)` will be as follows.
-```solidity
-START() + 4 * EPOCH_LENGTH()
-```
-And block.timestamp has to be bigger than this value to pass this check. Therefore, this function can call when the epoch enters into 4.
-
-## Code Snippet
-https://github.com/unchain-dev/2022-10-astaria-UNCHAIN/blob/main/src/PublicVault.sol#L236-L249
-```solidity
-  /**
-   * @notice Rotate epoch boundary. This must be called before the next epoch can begin.
-   */
-  function processEpoch() external {
-    // check to make sure epoch is over
-    require(getEpochEnd(currentEpoch) < block.timestamp, "Epoch has not ended");
-    require(withdrawReserve == 0, "Withdraw reserve not empty");
-    if (liquidationAccountants[currentEpoch] != address(0)) {
-      require(
-        LiquidationAccountant(liquidationAccountants[currentEpoch])
-          .getFinalAuctionEnd() < block.timestamp,
-        "Final auction not ended"
-      );
-    }
-```
-https://github.com/unchain-dev/2022-10-astaria-UNCHAIN/blob/main/src/PublicVault.sol#L473-L475
-```solidity
-function getEpochEnd(uint256 epoch) public view returns (uint256) {
-    return START() + (epoch + 1) * EPOCH_LENGTH();
-}
-
-```
-
-
-## Tool used
-Manual Review
-
-## Recommendation
-Should change as follows to implement like the comment.
-```solidity
-/**
- * @notice Rotate epoch boundary. This must be called before the next epoch can begin.
-*/
-function processEpoch() external {
- // check to make sure epoch is over
- require(getEpochEnd(currentEpoch - 1) < block.timestamp, "Epoch has not ended");
-  /* ... */
-}
-```
-
-# Issue M-29: Users can't set the future epoch 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/134 
-
-## Found by 
-neila
-
-## Summary
-Users can't set the future epoch
-
-## Vulnerability Detail
-Docs says as follows
-https://docs.astaria.xyz/docs/smart-contracts/WithdrawProxy
-> liquidity providers must signal that they wish to withdraw funds at least one epoch in advance.
-However, `currentEpoch` is hardcoded
-
-## Impact 
-Users can't set future epoch for withdrawal
-
-## Code Snippet
-https://github.com/unchain-dev/2022-10-astaria-UNCHAIN/blob/main/src/PublicVault.sol#L123
-```solidity
-uint64 public currentEpoch = 0;
-```
-https://github.com/unchain-dev/2022-10-astaria-UNCHAIN/blob/main/src/PublicVault.sol#L161-L168
-```solidity
-
-function withdraw(
-    uint256 assets,
-    address receiver,
-    address owner
-  ) public virtual override returns (uint256 shares) {
-    shares = previewWithdraw(assets);
-    redeemFutureEpoch(shares, receiver, owner, currentEpoch);
-  }
-```
-https://github.com/unchain-dev/2022-10-astaria-UNCHAIN/blob/main/src/PublicVault.sol#L178-L199
-```solidity
-function redeemFutureEpoch(
-    uint256 shares,
-    address receiver,
-    address owner,
-    uint64 epoch
-  ) public virtual returns (uint256 assets) {
-    // check to ensure that the requested epoch is not the current epoch or in the past
-    // always epoch == currentEpoch by redeem
-
-    require(epoch >= currentEpoch, "Exit epoch too low");
-    require(msg.sender == owner, "Only the owner can redeem");
-    // check for rounding error since we round down in previewRedeem.
-```
-
-## Tool used
-Manual Review
-
-## Recommendation
-Let users to be able to set epoch
-
-# Issue M-30: LiquidationAccountant.claim function can be called any time 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/89 
-
-## Found by 
-rvierdiiev
-
-## Summary
-`LiquidationAccountant.claim` function can be called any time.
-## Vulnerability Detail
-Function `LiquidationAccountant.claim` should not be called once auction is ongoing.
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LiquidationAccountant.sol#L66-L69
-```solidity
-    require(
-      block.timestamp > finalAuctionEnd || finalAuctionEnd == uint256(0),
-      "final auction has not ended"
-    );
-```
-
-However this check will be always true, because `finalAuctionEnd` is not a timestamp, but a period and you can't compare it with `block.timestamp`.
-
-This is how this value is provided
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L407-L410
-```solidity
-            LiquidationAccountant(accountant).handleNewLiquidation(
-              lien.amount,
-              COLLATERAL_TOKEN.auctionWindow() + 1 days
-            );
-```
-
-And `COLLATERAL_TOKEN.auctionWindow()` is [period](https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/CollateralToken.sol#L97).
-## Impact
-The check will always be true, so you can call `claim` even auction is not ended yet.
-## Code Snippet
-Provided above
-## Tool used
-
-Manual Review
-
-## Recommendation
-Use this in AstariaRouter when liquidate.
-```solidity
-            LiquidationAccountant(accountant).handleNewLiquidation(
-              lien.amount,
-              block.timestamp + COLLATERAL_TOKEN.auctionWindow() + 1 days
-            );
-```
-
-# Issue M-31: Possible to fully block PublicVault.processEpoch function. No one will be able to receive their funds 
+# Issue H-28: Possible to fully block PublicVault.processEpoch function. No one will be able to receive their funds 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/88 
 
@@ -3489,33 +1811,1440 @@ Manual Review
 ## Recommendation
 Make function WithdrawProxy.deposit not callable.
 
-# Issue M-32: Vault: Unprotected mint / redeem function 
+## Discussion
 
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/84 
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Causes total loss of funds for LPs when this happens. High risk
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Causes total loss of funds for LPs when this happens. High risk
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted
+
+**sherlock-admin**
+
+> Escalation accepted
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue H-29: nlrType type is not signed by strategist, which could allow fraudulent behavior as new types are added 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/72 
 
 ## Found by 
-0x4141
+obront
 
 ## Summary
-`Vault` only protects the `deposit` / `withdraw` functions.
+
+The strategist signs the merkle root, their nonce, and the deadline of all strategies to ensure that new borrowers meet their criteria. However, the lien type (`nlrType`) is not signed. Currently, the structs for the different types are unique, so there is no ability to borrow one type as another, but if struct schemas of different types overlap in the future, this will open the door for exploits.
 
 ## Vulnerability Detail
-Within `Vault`, the `deposit` / `withdraw` functions are only callable by the owner. However, because the contracts inherits from ERC4626, there are also `mint` and `redeem` functions which are callable by anyone.
+
+When a new lien is requested, the borrower submits a Lien Request, which is filled with the parameters at which they would like to borrow. This is kept honest and aligned with the lenders intent because the merkle root, strategist nonce, and deadline are all signed by the strategist.
+
+Because the merkle root is signed, the borrower must submit lien parameters (`nlrDetails`) that align with one of the strategies that the strategist has chosen to allow (represented as leaves in the merkle tree). The schemas of these signed structs differ depending on the validator being used, which is defined in the `nlrType` parameter.
+
+Currently, each of the validators has a unique schema for their struct. However, if there is an overlap in the schema of the Details struct of multiple validators, where the different parameters represent different values, it opens the door to having a fraudulent lien accepted.
+
+Here's an example of how this might work:
+- Type A has a Details struct with the shape { uint8 version, bool requirementX, IAstariaRouter.LienDetails lien }. 
+- The lender includes in their merkle tree the following { version: 1, requirementX: true, lien: { ... maxAmount: 1 ether ... }
+- Type B has a Details struct with the shape { uint8 version, bool requirementY, IAstariaRouter.LienDetails lien }
+- The lender includes in their merkle tree the following strategy: { version: 1, requirementY: true, lien { ... maxAmount: 1 ether ... }
+- The lender signs a merkle root including both of these strategies
+- A borrower who meets requirementX but not requirementY could submit `lienDetails` with `nlrType = Type A` and send the validation to the wrong strategy validator, thus bypassing the expected checks
 
 ## Impact
-Anyone can fund and exit the vault, which should not be possible for private vaults.
+
+As more strategy types are added, conflicts in struct schemas could open the door to fraudulent behavior.
 
 ## Code Snippet
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L85
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L222-L232
+
+Current Details struct schemas:
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/strategies/CollectionValidator.sol#L19-L24
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/strategies/UNI_V3Validator.sol#L21-L31
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/strategies/UniqueValidator.sol#L19-L25
 
 ## Tool used
 
 Manual Review
 
 ## Recommendation
-Also overwrite the `mint` and `redeem` functions.
 
-# Issue M-33: LiquidationAccountant.claim may revert for some tokens 
+Include the `nlrType` in the data signed by the strategist. The easiest way to do this would be to pack it in with each leaf when assembling the leaves that will create the merkle tree:
+
+```solidity
+function assembleLeaf(ICollectionValidator.Details memory details, address nlrType)
+  public
+  pure
+  returns (bytes memory)
+{
+  return abi.encode(details, nlrType);
+}
+
+function validateAndParse... {
+  ...
+  leaf = keccak256(assembleLeaf(cd, params.nlrType));
+}
+```
+
+# Issue H-30: Auctions can end in epoch after intended, underpaying withdrawers 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/51 
+
+## Found by 
+obront
+
+## Summary
+
+When liens are liquidated, the router checks if the auction will complete in a future epoch and, if it does, sets up a liquidation accountant and other logistics to account for it. However, the check for auction completion does not take into account extended auctions, which can therefore end in an unexpected epoch and cause accounting issues, losing user funds.
+
+## Vulnerability Detail
+
+The liquidate() function performs the following check to determine if it should set up the liquidation to be paid out in a future epoch:
+
+```solidity
+if (PublicVault(owner).timeToEpochEnd() <= COLLATERAL_TOKEN.auctionWindow())
+```
+This function assumes that the auction will only end in a future epoch if the `auctionWindow` (typically set to 2 days) pushes us into the next epoch.
+
+However, auctions can last up to an additional 1 day if bids are made within the final 15 minutes. In these cases, auctions are extended repeatedly, up to a maximum of 1 day.
+
+```solidity
+if (firstBidTime + duration - block.timestamp < timeBuffer) {
+  uint64 newDuration = uint256(
+    duration + (block.timestamp + timeBuffer - firstBidTime)
+  ).safeCastTo64();
+  if (newDuration <= auctions[tokenId].maxDuration) {
+    auctions[tokenId].duration = newDuration;
+  } else {
+    auctions[tokenId].duration =
+      auctions[tokenId].maxDuration -
+      firstBidTime;
+  }
+  extended = true;
+}
+```
+The result is that there are auctions for which accounting is set up for them to end in the current epoch, but will actual end in the next epoch. 
+
+## Impact
+
+Users who withdrew their funds in the current epoch, who are entitled to a share of the auction's proceeds, will not be paid out fairly.
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L388-L415
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L127-L146
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Change the check to take the possibility of extension into account:
+
+```solidity
+if (PublicVault(owner).timeToEpochEnd() <= COLLATERAL_TOKEN.auctionWindow() + 1 days)
+```
+
+## Discussion
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+The specific issue address in this submission is incorrect. It passes COLLATERAL_TOKEN.auctionWindow() + 1 days (max possible duration of an auction) into handleNewLiquidation which makes this a non issue. 
+
+Relevant Lines:
+https://github.com/sherlock-audit/2022-10-astaria/blob/7d12a5516b7c74099e1ce6fb4ec87c102aec2786/src/AstariaRouter.sol#L407-L410
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> The specific issue address in this submission is incorrect. It passes COLLATERAL_TOKEN.auctionWindow() + 1 days (max possible duration of an auction) into handleNewLiquidation which makes this a non issue. 
+> 
+> Relevant Lines:
+> https://github.com/sherlock-audit/2022-10-astaria/blob/7d12a5516b7c74099e1ce6fb4ec87c102aec2786/src/AstariaRouter.sol#L407-L410
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation rejected. 
+
+The `if` in https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L388-L391 is missing the auction window extension of 1 day.  This leads to auctions with extended durations overlapping the current epoch and not having liquidation accountants in place
+
+**sherlock-admin**
+
+> Escalation rejected. 
+> 
+> The `if` in https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L388-L391 is missing the auction window extension of 1 day.  This leads to auctions with extended durations overlapping the current epoch and not having liquidation accountants in place
+
+This issue's escalations have been rejected!
+
+Watsons who escalated this issue will have their escalation amount deducted from their next payout.
+
+
+
+# Issue H-31: Claiming liquidationAccountant will reduce vault y-intercept by more than the correct amount 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/48 
+
+## Found by 
+obront
+
+## Summary
+
+When `claim()` is called on the Liquidation Accountant, it decreases the y-intercept based on the balance of the contract after funds have been distributed, rather than before. The result is that the y-intercept will be decreased more than it should be, siphoning funds from all users.
+
+## Vulnerability Detail
+
+When `LiquidationAccountant.sol:claim()` is called, it uses its `withdrawRatio` to send some portion of its earnings to the `WITHDRAW_PROXY` and the rest to the vault.
+
+After performing these transfers, it updates the vault's y-intercept, decreasing it by the gap between the expected return from the auction, and the reality of how much was sent back to the vault:
+
+```solidity
+PublicVault(VAULT()).decreaseYIntercept(
+  (expected - ERC20(underlying()).balanceOf(address(this))).mulDivDown(
+    1e18 - withdrawRatio,
+    1e18
+  )
+);
+```
+This rebalancing uses the balance of the `liquidationAccountant` to perform its calculation, but it is done after the balance has already been distributed, so it will always be 0.
+
+Looking at an example:
+- `expected = 1 ether` (meaning the y-intercept is currently based on this value)
+- `withdrawRatio = 0` (meaning all funds will go back to the vault)
+- The auction sells for exactly 1 ether
+- 1 ether is therefore sent directly to the vault
+- In this case, the y-intercept should not be updated, as the outcome was equal to the expected outcome
+- However, because the calculation above happens after the funds are distributed, the decrease equals `(expected - 0) * 1e18 / 1e18`, which equals `expected`
+
+That decrease should not happen, and causing problems for the protocol's accounting. For example, when `withdraw()` is called, it uses the y-intercept in its calculation of the `totalAssets()` held by the vault, creating artificially low asset values for a given number of shares.
+
+## Impact
+
+Every time the liquidation accountant is used, the vault's math will be thrown off and user shares will be falsely diluted.
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LiquidationAccountant.sol#L62-L97
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+The amount of assets sent to the vault has already been calculated, as we've already sent it. Therefore, rather than the full existing formula, we can simply call:
+
+```solidity
+PublicVault(VAULT()).decreaseYIntercept(expected - balance)
+```
+
+Alternatively, we can move the current code above the block of code that transfers funds out (L73).
+
+# Issue H-32: Incorrect fees will be charged 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/36 
+
+## Found by 
+csanuragjain
+
+## Summary
+If user has provided transferAmount which is greater than all lien.amount combined then initiatorPayment will be incorrect since it is charged on full amount when only partial was used as shown in poc
+
+## Vulnerability Detail
+1. Observe the _handleIncomingPayment function
+2. Lets say transferAmount was 1000
+3. initiatorPayment is calculated on this full transferAmount
+
+```python
+uint256 initiatorPayment = transferAmount.mulDivDown(
+      auction.initiatorFee,
+      100
+    ); 
+```
+
+4. Now all lien are iterated and lien.amount is kept on deducting from transferAmount until all lien are navigated
+
+```python
+if (transferAmount >= lien.amount) {
+          payment = lien.amount;
+          transferAmount -= payment;
+        } else {
+          payment = transferAmount;
+          transferAmount = 0;
+        }
+
+        if (payment > 0) {
+          LIEN_TOKEN.makePayment(tokenId, payment, lien.position, payer);
+        }
+      }
+```
+
+5. Lets say after loop completes the transferAmount is still left as 100 
+6. This means only 400 transferAmount was used but fees was deducted on full amount 500
+
+## Impact
+Excess initiator fees will be deducted which was not required
+
+## Code Snippet
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L276
+
+## Tool used
+Manual Review
+
+## Recommendation
+Calculate the exact amount of transfer amount required for the transaction and calculate the initiator fee based on this amount
+
+## Discussion
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+The fee is not the problem, so this report is invalid. The issue is that the payment isn't working as intended and that sometimes it doesn't take as much as it should. See #107.
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> The fee is not the problem, so this report is invalid. The issue is that the payment isn't working as intended and that sometimes it doesn't take as much as it should. See #107.
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation rejected.
+
+This is a valid finding as fees are too high - Fees should be calculated based on the actual amount used as the repayment
+
+**sherlock-admin**
+
+> Escalation rejected.
+> 
+> This is a valid finding as fees are too high - Fees should be calculated based on the actual amount used as the repayment
+
+This issue's escalations have been rejected!
+
+Watsons who escalated this issue will have their escalation amount deducted from their next payout.
+
+
+
+# Issue H-33: isValidRefinance checks both conditions instead of one, leading to rejection of valid refinances 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/22 
+
+## Found by 
+obront
+
+## Summary
+
+`isValidRefinance()` is intended to check whether either (a) the loan interest rate decreased sufficiently or (b) the loan duration increased sufficiently. Instead, it requires both of these to be true, leading to the rejection of valid refinances.
+
+## Vulnerability Detail
+
+When trying to buy out a lien from `LienToken.sol:buyoutLien()`, the function calls `AstariaRouter.sol:isValidRefinance()` to check whether the refi terms are valid.
+
+```solidity
+if (!ASTARIA_ROUTER.isValidRefinance(lienData[lienId], ld)) {
+  revert InvalidRefinance();
+}
+```
+
+One of the roles of this function is to check whether the rate decreased by more than 0.5%. From the docs:
+
+> An improvement in terms is considered if either of these conditions is met:
+> - The loan interest rate decrease by more than 0.5%.
+> - The loan duration increases by more than 14 days.
+
+The currently implementation of the code requires both of these conditions to be met:
+
+```solidity
+return (
+    newLien.rate >= minNewRate &&
+    ((block.timestamp + newLien.duration - lien.start - lien.duration) >= minDurationIncrease)
+);
+```
+
+## Impact
+
+Valid refinances that meet one of the two criteria will be rejected.
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L488-L490
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Change the AND in the return statement to an OR:
+
+```solidity
+return (
+    newLien.rate >= minNewRate ||
+    ((block.timestamp + newLien.duration - lien.start - lien.duration) >= minDurationIncrease)
+);
+```
+
+## Discussion
+
+**SantiagoGregory**
+
+Independently fixed during our own review so there's no PR specifically for this, but this is now updated to an or.
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Should be medium because there are no funds at risk
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Should be medium because there are no funds at risk
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation rejected.
+
+Not a major loss of funds but definitely a severe flaw that will hurt the protocol.
+
+**sherlock-admin**
+
+> Escalation rejected.
+> 
+> Not a major loss of funds but definitely a severe flaw that will hurt the protocol.
+
+This issue's escalations have been rejected!
+
+Watsons who escalated this issue will have their escalation amount deducted from their next payout.
+
+
+
+# Issue H-34: isValidRefinance will approve invalid refinances and reject valid refinances due to buggy math 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/21 
+
+## Found by 
+0xRajeev, obront, hansfriese
+
+## Summary
+
+The math in `isValidRefinance()` checks whether the rate increased rather than decreased, resulting in invalid refinances being approved and valid refinances being rejected.
+
+## Vulnerability Detail
+
+When trying to buy out a lien from `LienToken.sol:buyoutLien()`, the function calls `AstariaRouter.sol:isValidRefinance()` to check whether the refi terms are valid.
+
+```solidity
+if (!ASTARIA_ROUTER.isValidRefinance(lienData[lienId], ld)) {
+  revert InvalidRefinance();
+}
+```
+One of the roles of this function is to check whether the rate decreased by more than 0.5%. From the docs:
+
+> An improvement in terms is considered if either of these conditions is met:
+> - The loan interest rate decrease by more than 0.5%.
+> - The loan duration increases by more than 14 days.
+
+The current implementation of the function does the opposite. It calculates a `minNewRate` (which should be `maxNewRate`) and then checks whether the new rate is greater than that value.
+
+```solidity
+uint256 minNewRate = uint256(lien.rate) - minInterestBPS;
+return (newLien.rate >= minNewRate ...
+```
+
+The result is that if the new rate has increased (or decreased by less than 0.5%), it will be considered valid, but if it has decreased by more than 0.5% (the ideal behavior) it will be rejected as invalid.
+
+## Impact
+
+- Users can perform invalid refinances with the wrong parameters.
+- Users who should be able to perform refinances at better rates will not be able to.
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L482-L491
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Flip the logic used to check the rate to the following:
+
+```solidity
+uint256 maxNewRate = uint256(lien.rate) - minInterestBPS;
+return (newLien.rate <= maxNewRate...
+```
+
+## Discussion
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Should be medium because no funds at risk
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Should be medium because no funds at risk
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation rejected.
+
+Not a major loss of funds but definitely a severe flaw that will hurt the protocol.
+
+**sherlock-admin**
+
+> Escalation rejected.
+> 
+> Not a major loss of funds but definitely a severe flaw that will hurt the protocol.
+
+This issue's escalations have been rejected!
+
+Watsons who escalated this issue will have their escalation amount deducted from their next payout.
+
+
+
+# Issue M-1: new loans "max duration" is not restricted 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/264 
+
+## Found by 
+bin2chen
+
+## Summary
+document :
+"
+Epochs
+[PublicVaults](https://docs.astaria.xyz/docs/smart-contracts/PublicVault) operate around a time-based epoch system. An epoch length is defined by the strategist that deploys the [PublicVault](https://docs.astaria.xyz/docs/smart-contracts/PublicVault). The duration of new loans is restricted to not exceed the end of the next epoch. For example, if a [PublicVault](https://docs.astaria.xyz/docs/smart-contracts/PublicVault) is 15 days into a 30-day epoch, new loans must not be longer than 45 days.
+"
+but more than 2 epoch's duration can be added
+
+## Vulnerability Detail
+the max duration is not detected. add success when > next epoch
+
+#AstariaTest#testBasicPublicVaultLoan
+
+```solidity
+  function testBasicPublicVaultLoan() public {
+
+  IAstariaRouter.LienDetails memory standardLien2 =
+    IAstariaRouter.LienDetails({
+      maxAmount: 50 ether,
+      rate: (uint256(1e16) * 150) / (365 days),
+      duration: 50 days,  /****** more then 14 * 2 *******/
+      maxPotentialDebt: 50 ether
+    });    
+
+    _commitToLien({
+      vault: publicVault,
+      strategist: strategistOne,
+      strategistPK: strategistOnePK,
+      tokenContract: tokenContract,
+      tokenId: tokenId,
+      lienDetails: standardLien2, /**** use standardLien2 ****/
+      amount: 10 ether,
+      isFirstLien: true
+    });
+  }
+```
+
+## Impact
+Too long duration
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/VaultImplementation.sol#L209
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+PublicVault#_afterCommitToLien
+```solidity
+  function _afterCommitToLien(uint256 lienId, uint256 amount)
+    internal
+    virtual
+    override
+  {
+    // increment slope for the new lien
+    unchecked {
+      slope += LIEN_TOKEN().calculateSlope(lienId);
+    }
+
+    ILienToken.Lien memory lien = LIEN_TOKEN().getLien(lienId);
+
+    uint256 epoch = Math.ceilDiv(
+      lien.start + lien.duration - START(),
+      EPOCH_LENGTH()
+    ) - 1;
+
++   require(epoch <= currentEpoch + 1,"epoch max <= currentEpoch + 1");
+
+    liensOpenForEpoch[epoch]++;
+    emit LienOpen(lienId, epoch);
+  }
+
+
+```
+
+# Issue M-2: If an auction has no bidder, the NFT ownership should go back to the loan lenders 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/258 
+
+## Found by 
+\_\_141345\_\_
+
+## Summary
+
+The lenders in principal have the claim for the loan collateral, but current rule will let the liquidation caller get the collateral for free. Effectively take advantage from the vault LP, which is not fair.
+
+
+## Vulnerability Detail
+
+After the `endAuction()`, the collateral will be released to the initiator. Essentially, the initiator gets the NFT for free. But the lenders of the loan take the loss.
+
+However, the lenders should have the claim to the collateral, since originally the funds are provided by the lenders. If the collateral at the end is owned by whoever calls the liquidation function, it is not fair for the lenders. And will discourage future users to use the protocol.
+
+
+## Impact
+
+- Lenders could suffer fund loss in some cases.
+- The unfair mechanism will discourage future users.
+
+
+## Code Snippet
+
+If there is no bidder, the winner will be assigned to the auction initiator. And the debts will all be wrote off.
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L178-L204
+
+After the `endAuction()`, the collateral will be released to the initiator. 
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/CollateralToken.sol#L341-L346
+
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+If there is no bidder for the auction, allow the NFT to get auctioned for another chance.
+
+
+
+## Discussion
+
+**androolloyd**
+
+working as intended
+
+**141345**
+
+Escalate for 3 USDC
+
+A borrower uses the NFT as collateral, the lender will get the collateral if the borrower defaults, that's how lending works normally. However, according to the current rule, anyone starts the liquidation process could potentially get the collateral, if no bidder bid on the auction. And the liquidator initiator already gets compensated by the initiator fee. 
+
+Current rule allows for a situation that 3rd user could gain the ownership of the NFT by calling `liquidate()`. But in common practice, it is the lender should claim the ownership of the collateral.
+
+One step further, if by any chance, the initiator could start some DoS attack and make the protocol inoperable, this rule may become part of the attack, to get the collateral for free.
+
+Although it is a corner case, I believe this is a business logic issue.
+
+
+**sherlock-admin**
+
+ > Escalate for 3 USDC
+> 
+> A borrower uses the NFT as collateral, the lender will get the collateral if the borrower defaults, that's how lending works normally. However, according to the current rule, anyone starts the liquidation process could potentially get the collateral, if no bidder bid on the auction. And the liquidator initiator already gets compensated by the initiator fee. 
+> 
+> Current rule allows for a situation that 3rd user could gain the ownership of the NFT by calling `liquidate()`. But in common practice, it is the lender should claim the ownership of the collateral.
+> 
+> One step further, if by any chance, the initiator could start some DoS attack and make the protocol inoperable, this rule may become part of the attack, to get the collateral for free.
+> 
+> Although it is a corner case, I believe this is a business logic issue.
+> 
+
+You've created a valid escalation for 3 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted.
+
+Will be rewarded a medium as it requires the auction to end with 0 bids
+
+**sherlock-admin**
+
+> Escalation accepted.
+> 
+> Will be rewarded a medium as it requires the auction to end with 0 bids
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue M-3: _makePayment is logically inconsistent with how lien stack is managed causing payments to multiple liens to fail 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/232 
+
+## Found by 
+TurnipBoy
+
+## Summary
+
+`_makePayment(uint256, uint256)` looping logic is inconsistent with how `_deleteLienPosition` manages the lien stack. `_makePayment` loops from 0 to `openLiens.length` but `_deleteLienPosition` (called when a lien is fully paid off) actively compresses the lien stack. When a payment pays off multiple liens the compressing effect causes an array OOB error towards the end of the loop.
+
+## Vulnerability Detail
+
+    function _makePayment(uint256 collateralId, uint256 totalCapitalAvailable)
+      internal
+    {
+      uint256[] memory openLiens = liens[collateralId];
+      uint256 paymentAmount = totalCapitalAvailable;
+      for (uint256 i = 0; i < openLiens.length; ++i) {
+        uint256 capitalSpent = _payment(
+          collateralId,
+          uint8(i),
+          paymentAmount,
+          address(msg.sender)
+        );
+        paymentAmount -= capitalSpent;
+      }
+    }
+
+`LienToken.sol#_makePayment(uint256, uint256)` loops from 0 to `openLiens.Length`. This loop attempts to make a payment to each lien calling `_payment` with the current index of the loop.
+
+    function _deleteLienPosition(uint256 collateralId, uint256 position) public {
+      uint256[] storage stack = liens[collateralId];
+      require(position < stack.length, "index out of bounds");
+
+      emit RemoveLien(
+        stack[position],
+        lienData[stack[position]].collateralId,
+        lienData[stack[position]].position
+      );
+      for (uint256 i = position; i < stack.length - 1; i++) {
+        stack[i] = stack[i + 1];
+      }
+      stack.pop();
+    }
+
+`LienToken.sol#_deleteLienPosition` is called on liens when they are fully paid off. The most interesting portion of the function is how the lien is removed from the stack. We can see that all liens above the lien in question are slid down the stack and the top is popped. This has the effect of reducing the total length of the array. This is where the logical inconsistency is. If the first lien is paid off, it will be removed and the formerly second lien will now occupy it's index. So then when `_payment` is called in the next loop with the next index it won't reference the second lien since the second lien is now in the first lien index.
+
+Assuming there are 2 liens on some collateral. `liens[0].amount = 100` and `liens[1].amount = 50`. A user wants to pay off their entire lien balance so they call  `_makePayment(uint256, uint256)` with an amount of 150. On the first loop it calls `_payment` with an index of 0. This pays off `liens[0]`. `_deleteLienPosition` is called with index of 0 removing `liens[0]`. Because of the sliding logic in `_deleteLienPosition` `lien[1]` has now slid into the `lien[0]` position. On the second loop it calls `_payment` with an index of 1. When it tries to grab the data for the lien at that index it will revert due to OOB error because the array no long contains an index of 1.
+
+## Impact
+
+Large payment are impossible and user must manually pay off each liens separately 
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L410-L424
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Payment logic inside of `AuctionHouse.sol` works. `_makePayment` should be changed to mimic that logic.
+
+
+
+## Discussion
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Not a dupe of #190, issue is with the lien array is managed as the payments are made. Fixing #190 wouldn't fix this.
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Not a dupe of #190, issue is with the lien array is managed as the payments are made. Fixing #190 wouldn't fix this.
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepeted
+
+
+
+# Issue M-4: Outstanding debt is not guaranteed to be covered by auctions 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/203 
+
+## Found by 
+0xRajeev
+
+## Summary
+
+The best-effort one-time English auction for borrower collateral is not economically efficient to drive auction bids towards reaching the total outstanding debt, which leads to loss of LP funds.
+
+## Vulnerability Detail
+
+When any lien against a borrower collateral is not paid within the lien duration, the underlying collateral is put up for auction where bids can come in at any price. The borrower is allowed to cancel the auction if the current bid is lower than the reserve price which is set to the total outstanding debt. The reserve price is not enforced anywhere else. If there are no bids, the liquidator will receive the collateral.
+
+## Impact
+
+This auction design of a best-effort one-time English auction is not economically efficient to drive auction bids towards reaching the total outstanding debt which effectively leads to loss of LP funds on unpaid liens.
+
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L210-L217
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L178-L182
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Consider alternative auction design mechanisms e.g. a Dutch auction where the auction starts at the reserve price to provide a higher payment possibility to the LPs.
+
+## Discussion
+
+**SantiagoGregory**
+
+We're switching to a Dutch auction through Seaport.
+
+**Evert0x**
+
+Downgrading to info as it's a protocol design choice.
+
+**secureum**
+
+Escalate for 2 USDC.
+
+This finding is based on current protocol design and implementation (i.e. there was no documentation suggesting their future switch to Dutch auction). Based on the protocol team's response above, they effectively confirm the current design choice (_and_ implementation) to be a serious enough issue that they are changing the protocol design to what is recommended by this finding. Just because it is a design issue does not deem this to be downgraded to informational — design drives implementation and is harder to change. Moving to a Dutch auction, as recommended, will affect significant parts of protocol implementation.
+
+Therefore, we still think this is of Medium severity impact, if not higher.
+
+cc @berndartmueller @lucyoa
+
+**sherlock-admin**
+
+ > Escalate for 2 USDC.
+> 
+> This finding is based on current protocol design and implementation (i.e. there was no documentation suggesting their future switch to Dutch auction). Based on the protocol team's response above, they effectively confirm the current design choice (_and_ implementation) to be a serious enough issue that they are changing the protocol design to what is recommended by this finding. Just because it is a design issue does not deem this to be downgraded to informational — design drives implementation and is harder to change. Moving to a Dutch auction, as recommended, will affect significant parts of protocol implementation.
+> 
+> Therefore, we still think this is of Medium severity impact, if not higher.
+> 
+> cc @berndartmueller @lucyoa
+
+You've created a valid escalation for 2 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted based on comment from Watson
+
+**sherlock-admin**
+
+> Escalation accepted based on comment from Watson
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue M-5: Extension logic incorrectly extends the auction by an additional amount of existing duration 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/201 
+
+## Found by 
+minhquanym, bin2chen, yixxas, Prefix, 0xRajeev
+
+## Summary
+
+Incorrect auction extension logic extends the auction by an additional amount of the previous duration instead of extending it by 15 minutes.
+
+## Vulnerability Detail
+
+The calculation of `newDuration` incorrectly adds `duration` in the auction extension logic. This causes the new duration to be extended by an additional amount of the existing duration, instead of an additional 15 minutes (`timeBuffer`), when a bid is created in the last 15 mins of the existing auction duration.
+
+## Impact
+
+Delayed payout of funds/collateral upon auction completion only after the newly extended duration.
+
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L135-L137
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Change the calculation to `uint64 newDuration = uint256(block.timestamp + timeBuffer - firstBidTime).safeCastTo64();`
+
+# Issue M-6: `AstariaRouter.commitToLiens` will revert if the protocol fee is enabled 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/195 
+
+## Found by 
+0xRajeev
+
+## Summary
+
+The function `commitToLiens()` will revert in `getProtocolFee()`, which prevents borrowers from depositing collateral and requesting loans in the protocol.
+
+## Vulnerability Detail
+
+If the protocol fee is enabled by setting `feeTo` to a non-zero address, then `getProtocolFee()` will revert because of division-by-zero given that `protocolFeeDenominator` is `0` without any initialization and no setter (in `file()`) for setting it.
+ 
+## Impact
+
+The function `commitToLiens()` will revert if the protocol fee is enabled thus preventing borrowers from depositing collateral and requesting loans in the protocol thereby failing to bootstrap its core NFT lending functionality.
+
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L66-L67
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L441-L443
+3. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/VaultImplementation.sol#L337-L340
+4. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/VaultImplementation.sol#L331
+5. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/VaultImplementation.sol#L242-L250
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Initialize protocol fee numerator and denominator in `AstariaRouter` and add their setters to `file()`.
+
+## Discussion
+
+**secureum**
+
+Escalate for 2 USDC.
+
+We do not think this is a duplicate issue of #204. While both are about `commitToLiens()` reverting, the triggering locations, conditions and therefore the recommendations are entirely different. This issue is specific to non-initialization of protocol fee variables as described above.
+
+cc @berndartmueller @lucyoa
+
+**sherlock-admin**
+
+ > Escalate for 2 USDC.
+> 
+> We do not think this is a duplicate issue of #204. While both are about `commitToLiens()` reverting, the triggering locations, conditions and therefore the recommendations are entirely different. This issue is specific to non-initialization of protocol fee variables as described above.
+> 
+> cc @berndartmueller @lucyoa
+
+You've created a valid escalation for 2 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted
+
+**sherlock-admin**
+
+> Escalation accepted
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue M-7: `LienToken.createLien` may prevent liens that satisfy their terms of `maxPotentialDebt` 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/192 
+
+## Found by 
+0xRajeev, hansfriese
+
+## Summary
+
+The `potentialDebt` calculation in `createLien` is incorrect.
+
+## Vulnerability Detail
+
+The calculated `potentialDebt` is effectively `(impliedRate + totalDebt) * params.terms.duration` because `getImpliedRate()` returns `impliedRate = impliedRate.mulDivDown(1, totalDebt);`. The calculated `potentialDebt` because of multiplying `totalDebt` by duration is significantly higher than it actually is and so will fail the `params.terms.maxPotentialDebt` check and revert. 
+
+## Impact
+
+This will cause DoS on valid lien creation.
+
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L256-L260
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L526
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Have `getImpliedRate()` *not* do `impliedRate = impliedRate.mulDivDown(1, totalDebt);` and calculate `potentialDebt` as `totalDebt * (1 + impliedRate *  params.terms.duration * mulDivDown(1, INTEREST_DENOMINATOR)`.
+
+# Issue M-8: Incorrect `LienToken.changeInSlope` calculation can lead to vault insolvency 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/189 
+
+## Found by 
+0xRajeev, hansfriese
+
+## Summary
+
+The calculation of `newSlope` in `changeInSlope()` is incorrect which can lead to vault insolvency.
+
+## Vulnerability Detail
+
+Contrary to the `changeInSlope` function, the `calculateSlope` function uses the `_getOwed` function to calculate the owed amount (incl. the interest). The interest is calculated with the `_getInterest` function. This function takes care of the `lien.last` and also if a lien is expired already. This logic is completely missing in the `changeInSlope` for the `newSlope` calculation which makes it incorrect. Also, very importantly, in the `changeInSlope` function, the `INTEREST_DENOMINATOR` is missing which makes the value inflated causing an underflow error in the last line of `changeInSlope` function: `slope = oldSlope - newSlope`;. `oldslope`, which accounts for the `INTEREST_DENOMINATOR`, is less than `newSlope`.
+
+## Impact
+
+The incorrect `changeInSlope()` calculation can lead to reverts and vault insolvency because users cannot determine the implicit value of vaults while interacting with it as borrowers or lenders.
+
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L453-L469
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L440-L445
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Make `changeInSlope()` consistent with `calculateSlope()` by implementing a separate helper function to calculate the interest accounting for all the parameters and reusing it in both places.
+
+# Issue M-9: Auctions run for less time than intended 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/186 
+
+## Found by 
+chainNue, obront, hansfriese, peanuts, 0xRajeev, csanuragjain
+
+## Summary
+
+Auctions run for less time than intended causing them to be not economically efficient for the lenders, thus causing a suboptimal credit of liquidation funds to them.
+
+## Vulnerability Detail
+
+From the documentation/comments, we can infer that `firstBidTime` is supposed to be `// The time of the first bid` and duration is supposed to be `// The length of time to run the auction for, after the first bid was made.`
+
+However, when an auction is created in `createAuction()`, the auction's `firstBidTime` is incorrectly initialized as `block.timestamp.safeCastTo64()` instead of `0`. This is premature initialization because the auction was only created here and no bid has been made yet via `createBid()`. The code in `createBid()` which check for `firstBidTime == 0 `is more evidence that the initialization in `createAuction()` is incorrect.
+
+## Impact
+
+This causes auctions to run for less time than intended if the first bid comes at a much later time after the auction was created. A shorter auction time could potentially allow fewer bids and cause it to be not economically efficient for the lenders, thus causing a suboptimal credit of liquidation funds to them.
+
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/interfaces/IAuctionHouse.sol#L12-L13
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L80
+3. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/AuctionHouse.sol#L166-L176
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+`createAuction()` should initialize `firstBidTime = 0`.
+
+## Discussion
+
+**androolloyd**
+
+will fix but its a convention issue we want auctions to start immediately not on first bid
+
+
+
+# Issue M-10: Minting public vault shares while the protocol is paused can lead to LP fund loss 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/174 
+
+## Found by 
+TurnipBoy, 0xRajeev
+
+## Summary
+
+Assets can be deposited into public vaults by LPs with `PublicVault.mint` function to bypass a possible paused protocol.
+
+## Vulnerability Detail
+
+The PublicVault contract prevents calls to the `PublicVault.deposit` function while the protocol is paused by using the `whenNotPaused` modifier.
+
+The `PublicVault` contract extends the `ERC4626Cloned` contract, which has two functions to deposit assets into the vault: the `deposit` function and the `mint` function. The latter function, however, is not overwritten in the PublicVault contract and therefore lacks the appropriate `whenNotPaused` modifier. 
+
+## Impact
+
+LPs can deposit assets into public vaults with the `PublicVault.mint` function to bypass a possible paused protocol. This can lead to LP fund loss depending on the reason for the protocol pause and the incident response.
+ 
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L222
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/ERC4626-Cloned.sol#L324
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Override the mint function and add the `whenNotPaused` modifier
+
+## Discussion
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Causes material loss of funds. Should be high risk
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Causes material loss of funds. Should be high risk
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation rejected.
+
+This issue depends on the pausable state being active, also, it has the potential to lead to a loss of funds, it's not a guarantee. 
+
+**sherlock-admin**
+
+> Escalation rejected.
+> 
+> This issue depends on the pausable state being active, also, it has the potential to lead to a loss of funds, it's not a guarantee. 
+
+This issue's escalations have been rejected!
+
+Contestants' payouts and scores will not be updated.
+
+Auditors who escalated this issue will have their escalation amount deducted from future payouts.
+
+
+
+# Issue M-11: Buyouts of shorter duration liens can lead to the loss of borrower funds 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/171 
+
+## Found by 
+0xRajeev
+
+## Summary
+
+Liens whose duration is equal to (or maybe less than) `minDurationIncrease` cannot be bought out to be replaced by newer liens with lower interest rates but the same duration. This locks the borrower out of better-termed liens, effectively resulting in the loss of their funds 
+ 
+## Vulnerability Detail
+
+Liens whose duration is equal to (or maybe less than) `minDurationIncrease` cannot be bought out to be replaced by newer liens with lower interest rates but the exact duration because it results in an underflow in `_getRemainingInterest()`.
+
+Example scenario: if the strategy`liendetails.duration` is <= 14 days, then it's impossible to do a buyout of a new lien because the implemented check requires to wait `minDurationIncrease`, which is set to 14 days. However, if the buyer waits 14 days, the lien is expired, which triggers the earlier mentioned underflow.
+
+## Impact
+
+The borrower gets locked out of better-termed liens, effectively resulting in the loss of their funds because of extra interest paid on older liens.
+ 
+## Code Snippet
+
+1. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L573
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L489-L490
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Revisit the checking logic and minimum duration as it applies to shorter-duration loans.
+
+## Discussion
+
+**SantiagoGregory**
+
+We updated buyoutLien() to check for a lower interest rate *or* higher duration.
+
+
+
+# Issue M-12: Loan duration can exceed the end of the next epoch 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/170 
+
+## Found by 
+0xRajeev
+
+## Summary
+
+Loan duration can exceed the end of the next epoch, which deviates from the protocol specification.
+
+## Vulnerability Detail
+
+From the specs: "The duration of new loans is restricted to not exceed the end of the next epoch. For example, if a PublicVault is 15 days into a 30-day epoch, new loans must not be longer than 45 days."
+
+However, there's no enforcement of this requirement. 
+
+## Impact
+
+The implementation does not adhere to the spec: Loan duration can exceed the end of the next epoch, which breaks protocol specification and therefore lead to miscalculations and potential fund loss.
+
+
+## Code Snippet
+
+1. https://docs.astaria.xyz/docs/protocol-mechanics/epochs
+2. https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/VaultImplementation.sol#L146-L228
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Implement as per specification or revisit the specification.
+
+# Issue M-13: First ERC4626 deposit can break share calculation 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/143 
+
+## Found by 
+pashov, joestakey, ctf\_sec, ak1, \_\_141345\_\_, neila, rvierdiiev, 0xNazgul, Jeiwan
+
+## Summary
+The first depositor of an ERC4626 vault can maliciously manipulate the share price by depositing the lowest possible amount (1 wei) of liquidity and then artificially inflating ERC4626.totalAssets.
+
+This can inflate the base share price as high as 1:1e18 early on, which force all subsequence deposit to use this share price as a base and worst case, due to rounding down, if this malicious initial deposit front-run someone else depositing, this depositor will receive 0 shares and lost his deposited assets.
+
+## Vulnerability Detail
+Given a vault with DAI as the underlying asset:
+
+Alice (attacker) deposits initial liquidity of 1 wei DAI via `deposit()`
+Alice receives 1e18 (1 wei) vault shares
+Alice transfers 1 ether of DAI via transfer() to the vault to artificially inflate the asset balance without minting new shares. The asset balance is now 1 ether + 1 wei DAI -> vault share price is now very high (= 1000000000000000000001 wei ~ 1000 * 1e18)
+Bob (victim) deposits 100 ether DAI
+Bob receives 0 shares
+Bob receives 0 shares due to a precision issue. His deposited funds are lost.
+
+The shares are calculated as following 
+`return supply == 0 ? assets : assets.mulDivDown(supply, totalAssets());`
+In case of a very high share price, due to totalAssets() > assets * supply, shares will be 0.
+## Impact
+`ERC4626` vault share price can be maliciously inflated on the initial deposit, leading to the next depositor losing assets due to precision issues.
+## Code Snippet
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/ERC4626-Cloned.sol#L392
+## Tool used
+
+Manual Review
+
+## Recommendation
+This is a well-known issue, Uniswap and other protocols had similar issues when supply == 0.
+
+For the first deposit, mint a fixed amount of shares, e.g. 10**decimals()
+```jsx
+if (supply == 0) {
+    return 10**decimals; 
+} else {
+    return assets.mulDivDown(supply, totalAssets());
+}
+```
+
+# Issue M-14: LiquidityProvider can also lend to PrivateVault 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/141 
+
+## Found by 
+neila
+
+## Summary
+Insufficient access control for lending to PublicVault
+found by [yawn-c111](https://github.com/yawn-c111)
+
+## Vulnerability Detail
+Docs says as follows
+https://docs.astaria.xyz/docs/intro
+> Any strategists may provide their own capital to fund these loans through their own `PrivateVaults`, and whitelisted strategists can deploy `PublicVaults` that accept funds from other liquidity providers.
+
+However, Liquidity Providers can also lend to `PrivateVault`.
+
+This is because `lendToVault` function is controlled by `mapping(address => address) public vaults`, which are managed by `_newVault` function and include `PrivateVault`s
+
+This leads to unexpected atttack.
+
+## Impact 
+Unexpected liquidity providers can lend to private vaults
+
+## Code Snippet
+https://github.com/unchain-dev/2022-10-astaria-UNCHAIN/blob/main/src/AstariaRouter.sol#L324
+
+```solidity
+function lendToVault(IVault vault, uint256 amount) external whenNotPaused {
+    TRANSFER_PROXY.tokenTransferFrom(
+      address(WETH),
+      address(msg.sender),
+      address(this),
+      amount
+    );
+
+    require(
+      vaults[address(vault)] != address(0),
+      "lendToVault: vault doesn't exist"
+    );
+    WETH.safeApprove(address(vault), amount);
+    vault.deposit(amount, address(msg.sender));
+  }
+```
+
+https://github.com/unchain-dev/2022-10-astaria-UNCHAIN/blob/main/src/AstariaRouter.sol#L500
+
+```solidity
+function _newVault(
+    uint256 epochLength,
+    address delegate,
+    uint256 vaultFee
+  ) internal returns (address) {
+    uint8 vaultType;
+
+    address implementation;
+    if (epochLength > uint256(0)) {
+      require(
+        epochLength >= minEpochLength && epochLength <= maxEpochLength,
+        "epochLength must be greater than or equal to MIN_EPOCH_LENGTH and less than MAX_EPOCH_LENGTH"
+      );
+      implementation = VAULT_IMPLEMENTATION;
+      vaultType = uint8(VaultType.PUBLIC);
+    } else {
+      implementation = SOLO_IMPLEMENTATION;
+      vaultType = uint8(VaultType.SOLO);
+    }
+
+    //immutable data
+    address vaultAddr = ClonesWithImmutableArgs.clone(
+      implementation,
+      abi.encodePacked(
+        address(msg.sender),
+        address(WETH),
+        address(COLLATERAL_TOKEN),
+        address(this),
+        address(COLLATERAL_TOKEN.AUCTION_HOUSE()),
+        block.timestamp,
+        epochLength,
+        vaultType,
+        vaultFee
+      )
+    );
+
+    //mutable data
+    VaultImplementation(vaultAddr).init(
+      VaultImplementation.InitParams(delegate)
+    );
+
+    vaults[vaultAddr] = msg.sender;
+
+    emit NewVault(msg.sender, vaultAddr);
+
+    return vaultAddr;
+  }
+```
+
+## Tool used
+Manual Review
+
+## Recommendation
+create requirement to lend to only PublicVaults.
+
+# Issue M-15: LiquidationAccountant.claim may revert for some tokens 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/83 
 
@@ -3541,7 +3270,7 @@ Manual Review
 ## Recommendation
 Do not initiate a transfer when the amount is zero.
 
-# Issue M-34: LienToken._payment function increases users debt 
+# Issue M-16: LienToken._payment function increases users debt 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/73 
 
@@ -3650,14 +3379,49 @@ Do not update lien.amount to _getOwed(lien).
 
 Downgrading to medium
 
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Invalid. All I see here is compounding interest. Nothing incorrect here, just a design choice. Plenty of loans use compounding interest.
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Invalid. All I see here is compounding interest. Nothing incorrect here, just a design choice. Plenty of loans use compounding interest.
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation rejected
+
+The impact of this is it'll cause a user in this situation to pay compound interest. Since loan is only 2 weeks, that will be very small impact. But the more often you make a payment the more interest you pay, a valid medium severity finding.
+
+**sherlock-admin**
+
+> Escalation rejected
+> 
+> The impact of this is it'll cause a user in this situation to pay compound interest. Since loan is only 2 weeks, that will be very small impact. But the more often you make a payment the more interest you pay, a valid medium severity finding.
+
+This issue's escalations have been rejected!
+
+Watsons who escalated this issue will have their escalation amount deducted from their next payout.
 
 
-# Issue M-35: Any public vault without a delegate can be drained 
+
+# Issue M-17: Any public vault without a delegate can be drained 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/69 
 
 ## Found by 
-obront, HonorLt, cryptphi, zzykxx, yixxas, rvierdiiev
+zzykxx, obront, cryptphi, HonorLt, yixxas, rvierdiiev
 
 ## Summary
 
@@ -3733,12 +3497,89 @@ Add a require statement that the recovered address cannot be the zero address:
 require(recovered != address(0));
 ```
 
-# Issue M-36: Strategist nonce is not checked 
+## Discussion
+
+**sherlock-admin**
+
+> Escalate for 1 USDC
+> 
+> Disagree with high. Requires a external factors and a bit of phishing to make this work. User would have to voluntarily make a lien position that has strategist == address(0) which should raise red flags. Medium seems more fitting. 
+> 
+> Relevant lines:
+> 
+> https://github.com/sherlock-audit/2022-10-astaria/blob/7d12a5516b7c74099e1ce6fb4ec87c102aec2786/src/VaultImplementation.sol#L178-L181
+> 
+> 
+
+You've deleted an escalation for this issue.
+
+
+
+# Issue M-18: LienToken.createLien doesn't check if user should be liquidated and provides new loan 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/66 
+
+## Found by 
+rvierdiiev
+
+## Summary
+`LienToken.createLien` doesn't check if user should be liquidated and provides new loan if auction do not exist for collateral.
+## Vulnerability Detail
+`LienToken.createLien` [relies](https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LienToken.sol#L244-L246)  on `AuctionHouse` to check if new loan can be added to borrower. It assumes that if auction doesn't exist then user is safe to take new loan.
+
+The problem is that to start auction with token that didn't pay the debt someone should call `AstariaRouter.liquidate` function. If no one did it then auction for the NFT will not exists, and `LienToken.createLien` will create new Lien to user, while he already didn't pay debt and should be liquidated.
+## Impact
+New loan will be paid to user that didn't repay previous lien.
+## Code Snippet
+Provided above
+## Tool used
+
+Manual Review
+
+## Recommendation
+Check if user can be liquidated through all of his liens positions. If not then only proceed with new loan.
+
+## Discussion
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Disagree with high severity. User would have to voluntarily sign a lien for another user who is already late on their payments (should raise some red flags), should only be medium or low given external circumstances
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Disagree with high severity. User would have to voluntarily sign a lien for another user who is already late on their payments (should raise some red flags), should only be medium or low given external circumstances
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted.
+
+**sherlock-admin**
+
+> Escalation accepted.
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue M-19: Strategist nonce is not checked 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/59 
 
 ## Found by 
-ctf\_sec, cryptphi, rvierdiiev, HonorLt
+HonorLt, rvierdiiev, ctf\_sec, cryptphi
 
 ## Summary
 Strategist nonce is not checked while checking commitment. This makes impossible for strategist to cancel signed commitment.
@@ -3802,7 +3643,7 @@ Manual Review
 ## Recommendation
 Give ability to strategist to call `increaseNonce` function.
 
-# Issue M-37: _validateCommitment fails for approved operators 
+# Issue M-20: _validateCommitment fails for approved operators 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/52 
 
@@ -3853,12 +3694,12 @@ Include an additional check to confirm whether the `msg.sender` is approved as a
     }
 ```
 
-# Issue M-38: timeToEpochEnd calculates backwards, breaking protocol math 
+# Issue M-21: timeToEpochEnd calculates backwards, breaking protocol math 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/50 
 
 ## Found by 
-obront, hansfriese, 0xRajeev, 0xNazgul
+0xNazgul, 0xRajeev, obront, hansfriese
 
 ## Summary
 
@@ -3922,7 +3763,99 @@ function timeToEpochEnd() public view returns (uint256) {
 }
 ```
 
-# Issue M-39: Underlying With Non-Standard Decimals Not Supported 
+# Issue M-22: Strategists are paid 10x the vault fee because of a math error 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/49 
+
+## Found by 
+obront
+
+## Summary
+
+Strategists set their vault fee in BPS (x / 10,000), but are paid out as x / 1,000. The result is that strategists will always earn 10x whatever vault fee they set.
+
+## Vulnerability Detail
+
+Whenever any payment is made towards a public vault, `beforePayment()` is called, which calls `_handleStrategistInterestReward()`.
+
+The function is intended to take the amount being paid, adjust by the vault fee to get the fee amount, and convert that amount of value into shares, which are added to `strategistUnclaimedShares`.
+
+```solidity
+function _handleStrategistInterestReward(uint256 lienId, uint256 amount)
+    internal
+    virtual
+    override
+  {
+    if (VAULT_FEE() != uint256(0)) {
+      uint256 interestOwing = LIEN_TOKEN().getInterest(lienId);
+      uint256 x = (amount > interestOwing) ? interestOwing : amount;
+      uint256 fee = x.mulDivDown(VAULT_FEE(), 1000);
+      strategistUnclaimedShares += convertToShares(fee);
+    }
+  }
+```
+Since the vault fee is stored in basis points, to get the vault fee, we should take the amount, multiply it by `VAULT_FEE()` and divide by 10,000. However, we accidentally divide by 1,000, which results in a 10x larger reward for the strategist than intended.
+
+As an example, if the vault fee is intended to be 10%, we would set `VAULT_FEE = 1000`. In that case, for any amount paid off, we would calculate `fee = amount * 1000 / 1000` and the full amount would be considered a fee for the strategist.
+
+## Impact
+
+Strategists will be paid 10x the agreed upon rate for their role, with the cost being borne by users.
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L513-L524
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Change the `1000` in the `_handleStrategistInterestReward()` function to `10_000`.
+
+## Discussion
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Don't agree with high severity. Fee can easily be changed by protocol after the fact to fix this, which is why medium makes more sense. Simple to fix as a parameter change.
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Don't agree with high severity. Fee can easily be changed by protocol after the fact to fix this, which is why medium makes more sense. Simple to fix as a parameter change.
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted.
+
+
+**sherlock-admin**
+
+> Escalation accepted.
+> 
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+**zobront**
+
+@Evert0x @IAmTurnipBoy VAULT_FEE is set as an immutable arg on the Vault, so there is no ability to change it later. It's permanently set and they'd need to redeploy the whole protocol to change it. This is clearly a high.
+
+
+
+# Issue M-23: Underlying With Non-Standard Decimals Not Supported 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/33 
 
@@ -3958,12 +3891,12 @@ Manual Review
 
 - Consider whether the addition of capital that does not use 18 decimals is desirable in the future. If it is, refactor contracts to support tokens with non-standard decimals.
 
-# Issue M-40: _payment() function transfers full paymentAmount, overpaying first liens 
+# Issue M-24: _payment() function transfers full paymentAmount, overpaying first liens 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/28 
 
 ## Found by 
-obront, 0xRajeev, bin2chen, hansfriese, tives, \_\_141345\_\_, ak1, rvierdiiev
+tives, ak1, obront, \_\_141345\_\_, bin2chen, 0xRajeev, hansfriese, rvierdiiev
 
 ## Summary
 
@@ -4024,7 +3957,7 @@ In `_payment()`, if `lien.amount < paymentAmount`, set `paymentAmount = lien.amo
 
 The result will be that, in this case, only `lien.amount` is transferred to the lien owner, and this value is also returned from the function to accurately represent the amount that was paid.
 
-# Issue M-41: _getInterest() function uses block.timestamp instead of the inputted timestamp 
+# Issue M-25: _getInterest() function uses block.timestamp instead of the inputted timestamp 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/25 
 
@@ -4070,56 +4003,7 @@ Manual Review
 
 Change `block.timestamp` to `timestamp` so that the if statement checks correctly.
 
-# Issue M-42: Checks for epoch lengths of new vaults are slightly off 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/23 
-
-## Found by 
-obront
-
-## Summary
-
-The check that new vaults has an `epochLength` in the range from `minEpochLength` (inclusive) to `maxEpochLength` (not inclusive) is slightly off.
-
-## Vulnerability Detail
-
-The error string for an incorrectly set epoch length reads:
-
-> "epochLength must be greater than or equal to MIN_EPOCH_LENGTH and less than MAX_EPOCH_LENGTH"
-
-However, in the code implementing this check, an `epochLength` equal to `maxEpochLength` is allowed.
-
-```solidity
-require(
-  epochLength >= minEpochLength && epochLength <= maxEpochLength,
-  "epochLength must be greater than or equal to MIN_EPOCH_LENGTH and less than MAX_EPOCH_LENGTH"
-);
-```
-
-## Impact
-
-Slightly longer epochs will be permitted than was intended.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L509-L512
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Change the check in the require statement to match the intended behavior:
-
-```solidity
-require(
-  epochLength >= minEpochLength && epochLength < maxEpochLength,
-  "epochLength must be greater than or equal to MIN_EPOCH_LENGTH and less than MAX_EPOCH_LENGTH"
-);
-```
-
-# Issue M-43: Vault Fee uses incorrect offset leading to wildly incorrect value, allowing strategists to steal all funds 
+# Issue M-26: Vault Fee uses incorrect offset leading to wildly incorrect value, allowing strategists to steal all funds 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/19 
 
@@ -4184,12 +4068,12 @@ Manual Review
 
 Set the offset for `VAULT_FEE()` to 165. I tested this value in the POC I created and it correctly returned the value of 5000.
 
-# Issue M-44: Bids cannot be created within timeBuffer of completion of a max duration auction 
+# Issue M-27: Bids cannot be created within timeBuffer of completion of a max duration auction 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/18 
 
 ## Found by 
-obront, 0xRajeev, Prefix, neila, csanuragjain, hansfriese, 0x4141, TurnipBoy, minhquanym, Jeiwan, yixxas, rvierdiiev, peanuts
+rvierdiiev, minhquanym, 0x4141, obront, hansfriese, TurnipBoy, peanuts, yixxas, neila, Prefix, csanuragjain, 0xRajeev, Jeiwan
 
 ## Summary
 
@@ -4241,4 +4125,73 @@ Change this assignment to simply assign `duration` to `maxDuration`, as follows:
 ```solidity
 auctions[tokenId].duration = auctions[tokenId].maxDuration
 ```
+
+# Issue M-28: ERC4626 does not work with fee-on-transfer tokens 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/3 
+
+## Found by 
+pashov, w42d3n, Bnke0x0
+
+## Summary
+
+## Vulnerability Detail
+
+## Impact
+The ERC4626-Cloned.deposit/mint functions do not work well with fee-on-transfer tokens as the `assets` variable is the pre-fee amount, including the fee, whereas the totalAssets do not include the fee anymore.
+
+## Code Snippet
+This can be abused to mint more shares than desired.
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/ERC4626-Cloned.sol#L305-L322
+
+             '  function deposit(uint256 assets, address receiver)
+                 public
+                 virtual
+                 override(IVault)
+                 returns (uint256 shares)
+               {
+                 // Check for rounding error since we round down in previewDeposit.
+                 require((shares = previewDeposit(assets)) != 0, "ZERO_SHARES");
+
+                 // Need to transfer before minting or ERC777s could reenter.
+                 ERC20(underlying()).safeTransferFrom(msg.sender, address(this), assets);
+
+                 _mint(receiver, shares);
+
+                 emit Deposit(msg.sender, receiver, assets, shares);
+
+                 afterDeposit(assets, shares);
+               }'
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/lib/astaria-gpl/src/ERC4626-Cloned.sol#L315
+
+     `ERC20(underlying()).safeTransferFrom(msg.sender, address(this), assets);`
+
+A `deposit(1000)` should result in the same shares as two deposits of `deposit(500)` but it does not because `assets` is the pre-fee amount.
+Assume a fee-on-transfer of `20%`. Assume current `totalAmount = 1000`, `totalShares = 1000` for simplicity.
+
+`deposit(1000) = 1000 / totalAmount * totalShares = 1000 shares`.
+`deposit(500) = 500 / totalAmount * totalShares = 500 shares`. Now the `totalShares` increased by 500 but the `totalAssets` only increased by `(100% - 20%) * 500 = 400`. Therefore, the second `deposit(500) = 500 / (totalAmount + 400) * (newTotalShares) = 500 / (1400) * 1500 = 535.714285714 shares`.
+
+In total, the two deposits lead to `35` more shares than a single deposit of the sum of the deposits.
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+`assets` should be the amount excluding the fee, i.e., the amount the contract actually received.
+This can be done by subtracting the pre-contract balance from the post-contract balance.
+However, this would create another issue with ERC777 tokens.
+
+Maybe `previewDeposit` should be overwritten by vaults supporting fee-on-transfer tokens to predict the post-fee amount. And do the shares computation on that, but then the `afterDeposit` is still called with the original `assets`and implementers need to be aware of this.
+
+## Discussion
+
+**androolloyd**
+
+we will not be supporting fee on transfer tokens at the time
+
+
 
