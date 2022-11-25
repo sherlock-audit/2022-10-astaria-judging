@@ -270,7 +270,7 @@ Watsons who escalated this issue will have their escalation amount deducted from
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/233 
 
 ## Found by 
-tives, ctf\_sec, 0x0, obront, TurnipBoy, yixxas, zzykxx
+obront, yixxas, ctf\_sec, TurnipBoy, zzykxx, 0x0, tives
 
 ## Summary
 
@@ -351,7 +351,7 @@ Contestants' payouts and scores will be updated according to the changes made on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/204 
 
 ## Found by 
-bin2chen, HonorLt, 0xRajeev, rvierdiiev, Jeiwan
+HonorLt, 0xRajeev, rvierdiiev, bin2chen, Jeiwan
 
 ## Summary
 
@@ -425,7 +425,7 @@ Contestants' payouts and scores will be updated according to the changes made on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/202 
 
 ## Found by 
-chainNue, minhquanym, hansfriese, bin2chen, TurnipBoy, peanuts, neila, Prefix, csanuragjain, 0xRajeev, Jeiwan
+minhquanym, neila, 0xRajeev, TurnipBoy, hansfriese, Prefix, peanuts, csanuragjain, bin2chen, Jeiwan, chainNue
 
 ## Summary
 
@@ -499,7 +499,7 @@ Contestants' payouts and scores will be updated according to the changes made on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/199 
 
 ## Found by 
-0x4141, bin2chen, TurnipBoy, 0xRajeev, Jeiwan
+0x4141, TurnipBoy, 0xRajeev, bin2chen, Jeiwan
 
 ## Summary
 
@@ -572,7 +572,7 @@ The cancellation amount required should be the reserve price + liquidation fee, 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/197 
 
 ## Found by 
-0xRajeev, zzykxx
+zzykxx, 0xRajeev
 
 ## Summary
 
@@ -659,7 +659,7 @@ Contestants' payouts and scores will be updated according to the changes made on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/196 
 
 ## Found by 
-8olidity, ctf\_sec, zzykxx, supernova, yixxas, neila, cccz, 0xRajeev, rvierdiiev
+yixxas, ctf\_sec, neila, 0xRajeev, supernova, rvierdiiev, zzykxx, 8olidity, cccz
 
 ## Summary
 
@@ -809,7 +809,7 @@ Manual Review
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/190 
 
 ## Found by 
-obront, 0xRajeev, zzykxx, Jeiwan
+obront, Jeiwan, zzykxx, 0xRajeev
 
 ## Summary
 
@@ -878,7 +878,7 @@ Contestants' payouts and scores will be updated according to the changes made on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/188 
 
 ## Found by 
-TurnipBoy, obront, 0xRajeev, rvierdiiev
+obront, TurnipBoy, 0xRajeev, rvierdiiev
 
 ## Summary
 
@@ -1004,7 +1004,7 @@ Manual Review
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/182 
 
 ## Found by 
-tives, zzykxx, obront, hansfriese, rvierdiiev, 0xRajeev, Jeiwan
+obront, 0xRajeev, hansfriese, rvierdiiev, zzykxx, Jeiwan, tives
 
 ## Summary
 
@@ -1153,7 +1153,7 @@ Calculate the slope of the lien before the buyout in the `VautImplementation.buy
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/179 
 
 ## Found by 
-Prefix, 0xRajeev, sorrynotsorry
+0xRajeev, Prefix, sorrynotsorry
 
 ## Summary
 
@@ -1191,7 +1191,7 @@ Revisit the logic that updates `lien.last` in the protocol to ensure no reverts 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/176 
 
 ## Found by 
-bin2chen, 0x4141, 0xRajeev, TurnipBoy
+TurnipBoy, 0x4141, 0xRajeev, bin2chen
 
 ## Summary
 
@@ -1483,7 +1483,7 @@ Revisit the liquidation logic and its triggering related to the auction window a
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/163 
 
 ## Found by 
-ctf\_sec, Jeiwan
+Jeiwan, ctf\_sec
 
 ## Summary
 
@@ -1912,7 +1912,153 @@ function validateAndParse... {
 }
 ```
 
-# Issue H-30: Auctions can end in epoch after intended, underpaying withdrawers 
+# Issue H-30: Any public vault without a delegate can be drained 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/69 
+
+## Found by 
+obront, HonorLt, yixxas, rvierdiiev, zzykxx, cryptphi
+
+## Summary
+
+If a public vault is created without a delegate, delegate will have the value of `address(0)`. This is also the value returned by `ecrecover` for invalid signatures (for example, if v is set to a position number that is not 27 or 28), which allows a malicious actor to cause the signature validation to pass for arbitrary parameters, allowing them to drain a vault using a worthless NFT as collateral.
+
+## Vulnerability Detail
+
+When a new Public Vault is created, the Router calls the `init()` function on the vault as follows:
+
+```solidity
+VaultImplementation(vaultAddr).init(
+  VaultImplementation.InitParams(delegate)
+);
+```
+If a delegate wasn't set, this will pass `address(0)` to the vault. If this value is passed, the vault simply skips the assignment, keeping the delegate variable set to the default 0 value:
+
+```solidity
+if (params.delegate != address(0)) {
+  delegate = params.delegate;
+}
+```
+Once the delegate is set to the zero address, any commitment can be validated, even if the signature is incorrect. This is because of a quirk in `ecrecover` which returns `address(0)` for invalid signatures. A signature can be made invalid by providing a positive integer that is not 27 or 28 as the `v` value. The result is that the following function call assigns `recovered = address(0)`:
+
+```solidity
+    address recovered = ecrecover(
+      keccak256(
+        encodeStrategyData(
+          params.lienRequest.strategy,
+          params.lienRequest.merkle.root
+        )
+      ),
+      params.lienRequest.v,
+      params.lienRequest.r,
+      params.lienRequest.s
+    );
+```
+To confirm the validity of the signature, the function performs two checks:
+```solidity
+require(
+  recovered == params.lienRequest.strategy.strategist,
+  "strategist must match signature"
+);
+require(
+  recovered == owner() || recovered == delegate,
+  "invalid strategist"
+);
+```
+These can be easily passed by setting the `strategist` in the params to `address(0)`. At this point, all checks will pass and the parameters will be accepted as approved by the vault.
+
+With this power, a borrower can create params that allow them to borrow the vault's full funds in exchange for a worthless NFT, allowing them to drain the vault and steal all the user's funds.
+
+## Impact
+
+All user's funds held in a vault with no delegate set can be stolen.
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L537-L539
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/VaultImplementation.sol#L118-L124
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/VaultImplementation.sol#L167-L185
+
+## Tool used
+
+Manual Review, Foundry
+
+## Recommendation
+
+Add a require statement that the recovered address cannot be the zero address:
+
+```solidity
+require(recovered != address(0));
+```
+
+## Discussion
+
+**sherlock-admin**
+
+> Escalate for 1 USDC
+> 
+> Disagree with high. Requires a external factors and a bit of phishing to make this work. User would have to voluntarily make a lien position that has strategist == address(0) which should raise red flags. Medium seems more fitting. 
+> 
+> Relevant lines:
+> 
+> https://github.com/sherlock-audit/2022-10-astaria/blob/7d12a5516b7c74099e1ce6fb4ec87c102aec2786/src/VaultImplementation.sol#L178-L181
+> 
+> 
+
+You've deleted an escalation for this issue.
+
+**zobront**
+
+Escalate for 5 USDC
+
+This may be the most severe flaw in the whole protocol. Definitely deserves to be a high.
+
+I’m not sure why it was downgraded, but the deleted escalation seems to think that the strategist needs to be address(0). This isn’t the case. We just need to set the strategist to address(0) in our fake data to make the signature pass.
+
+The delegate is a separate role that can be given access, and any user that doesn’t set a delegate will default to delegate being set to address(0).
+
+Any of these vaults can be drained for every single dollar in the vault due to this flaw.
+
+As you can see from the dups, every single one that realized this exploit marked it as a high. The only mediums are the ones that caught the zero address gap but didn’t understand how it was exploitable.
+
+**sherlock-admin**
+
+ > Escalate for 5 USDC
+> 
+> This may be the most severe flaw in the whole protocol. Definitely deserves to be a high.
+> 
+> I’m not sure why it was downgraded, but the deleted escalation seems to think that the strategist needs to be address(0). This isn’t the case. We just need to set the strategist to address(0) in our fake data to make the signature pass.
+> 
+> The delegate is a separate role that can be given access, and any user that doesn’t set a delegate will default to delegate being set to address(0).
+> 
+> Any of these vaults can be drained for every single dollar in the vault due to this flaw.
+> 
+> As you can see from the dups, every single one that realized this exploit marked it as a high. The only mediums are the ones that caught the zero address gap but didn’t understand how it was exploitable.
+
+You've created a valid escalation for 5 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted
+
+**sherlock-admin**
+
+> Escalation accepted
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue H-31: Auctions can end in epoch after intended, underpaying withdrawers 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/51 
 
@@ -2018,7 +2164,130 @@ Watsons who escalated this issue will have their escalation amount deducted from
 
 
 
-# Issue H-31: Claiming liquidationAccountant will reduce vault y-intercept by more than the correct amount 
+# Issue H-32: Strategists are paid 10x the vault fee because of a math error 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/49 
+
+## Found by 
+obront
+
+## Summary
+
+Strategists set their vault fee in BPS (x / 10,000), but are paid out as x / 1,000. The result is that strategists will always earn 10x whatever vault fee they set.
+
+## Vulnerability Detail
+
+Whenever any payment is made towards a public vault, `beforePayment()` is called, which calls `_handleStrategistInterestReward()`.
+
+The function is intended to take the amount being paid, adjust by the vault fee to get the fee amount, and convert that amount of value into shares, which are added to `strategistUnclaimedShares`.
+
+```solidity
+function _handleStrategistInterestReward(uint256 lienId, uint256 amount)
+    internal
+    virtual
+    override
+  {
+    if (VAULT_FEE() != uint256(0)) {
+      uint256 interestOwing = LIEN_TOKEN().getInterest(lienId);
+      uint256 x = (amount > interestOwing) ? interestOwing : amount;
+      uint256 fee = x.mulDivDown(VAULT_FEE(), 1000);
+      strategistUnclaimedShares += convertToShares(fee);
+    }
+  }
+```
+Since the vault fee is stored in basis points, to get the vault fee, we should take the amount, multiply it by `VAULT_FEE()` and divide by 10,000. However, we accidentally divide by 1,000, which results in a 10x larger reward for the strategist than intended.
+
+As an example, if the vault fee is intended to be 10%, we would set `VAULT_FEE = 1000`. In that case, for any amount paid off, we would calculate `fee = amount * 1000 / 1000` and the full amount would be considered a fee for the strategist.
+
+## Impact
+
+Strategists will be paid 10x the agreed upon rate for their role, with the cost being borne by users.
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L513-L524
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Change the `1000` in the `_handleStrategistInterestReward()` function to `10_000`.
+
+## Discussion
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Don't agree with high severity. Fee can easily be changed by protocol after the fact to fix this, which is why medium makes more sense. Simple to fix as a parameter change.
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Don't agree with high severity. Fee can easily be changed by protocol after the fact to fix this, which is why medium makes more sense. Simple to fix as a parameter change.
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted.
+
+
+**sherlock-admin**
+
+> Escalation accepted.
+> 
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+**zobront**
+
+Escalate for 5 USDC
+
+VAULT_FEE() is set as an immutable arg when vault is deployed using ClonesWithImmutableArgs. There is no ability to change it later as the escalation claims. This value would be hard coded in all vaults created.
+
+The result is that vault strategists would be given all of the funds of users who deposit in their vault, irretrievably stealing funds from users of the protocol. This is definitely a high.
+
+**sherlock-admin**
+
+ > Escalate for 5 USDC
+> 
+> VAULT_FEE() is set as an immutable arg when vault is deployed using ClonesWithImmutableArgs. There is no ability to change it later as the escalation claims. This value would be hard coded in all vaults created.
+> 
+> The result is that vault strategists would be given all of the funds of users who deposit in their vault, irretrievably stealing funds from users of the protocol. This is definitely a high.
+
+You've created a valid escalation for 5 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted
+
+**sherlock-admin**
+
+> Escalation accepted
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue H-33: Claiming liquidationAccountant will reduce vault y-intercept by more than the correct amount 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/48 
 
@@ -2077,7 +2346,155 @@ PublicVault(VAULT()).decreaseYIntercept(expected - balance)
 
 Alternatively, we can move the current code above the block of code that transfers funds out (L73).
 
-# Issue H-32: Incorrect fees will be charged 
+# Issue H-34: liquidationAccountant can be claimed at any time 
+
+Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/46 
+
+## Found by 
+obront
+
+## Summary
+
+New liquidations are sent to the `liquidationAccountant` with a `finalAuctionTimestamp` value, but the actual value that is passed in is simply the duration of an auction. The `claim()` function uses this value in a require check, so this error will allow it to be called before the auction is complete.
+
+## Vulnerability Detail
+
+When a lien is liquidated, `AstariaRouter.sol:liquidate()` is called. If the lien is set to end in a future epoch, we call `handleNewLiquidation()` on the `liquidationAccountant`.
+
+One of the values passed in this call is the `finalAuctionTimestamp`, which updates the `finalAuctionEnd` variable in the `liquidationAccountant`. This value is then used to protect the `claim()` function from being called too early.
+
+However, when the router calls `handleLiquidationAccountant()`, it passes the duration of an auction rather than the final timestamp:
+
+```solidity
+LiquidationAccountant(accountant).handleNewLiquidation(
+  lien.amount,
+  COLLATERAL_TOKEN.auctionWindow() + 1 days
+);
+```
+As a result, `finalAuctionEnd` will be set to 259200 (3 days). 
+
+When `claim()` is called, it requires the final auction to have ended for the function to be called:
+
+```solidity
+require(
+  block.timestamp > finalAuctionEnd || finalAuctionEnd == uint256(0),
+  "final auction has not ended"
+);
+```
+Because of the error above, `block.timestamp` will always be greater than `finalAuctionEnd`, so this will always be permitted. 
+
+## Impact
+
+Anyone can call `claim()` before an auction has ended. This can cause many problems, but the clearest is that it can ruin the protocol's accounting by decreasing the Y intercept of the vault. 
+
+For example, if `claim()` is called before the auction, the returned value will be 0, so the Y intercept will be decreased as if there was an auction that returned no funds. 
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L407-L410
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LiquidationAccountant.sol#L113-L120
+
+https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/LiquidationAccountant.sol#L65-L69
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Adjust the call from the router to use the ending timestamp as the argument, rather than the duration:
+
+```solidity
+LiquidationAccountant(accountant).handleNewLiquidation(
+  lien.amount,
+  block.timestamp + COLLATERAL_TOKEN.auctionWindow() + 1 days
+);
+```
+
+## Discussion
+
+**IAmTurnipBoy**
+
+Escalate for 1 USDC
+
+Touched on the same idea as #135. Tough call on duplication. This issue + #47 combine represent the same vulnerability fixed in both #135 and #188. In this issue it addresses being called too early and in #47 it addresses being called multiple times. The fix proposed in #135 and #188 address both issues by permissioning the function. IMHO this and 47 should be duped with #135 and #188, but up to judges. 
+
+ALSO little bit of a conflict of interest that @zobront validated his own issue here.
+
+**sherlock-admin**
+
+ > Escalate for 1 USDC
+> 
+> Touched on the same idea as #135. Tough call on duplication. This issue + #47 combine represent the same vulnerability fixed in both #135 and #188. In this issue it addresses being called too early and in #47 it addresses being called multiple times. The fix proposed in #135 and #188 address both issues by permissioning the function. IMHO this and 47 should be duped with #135 and #188, but up to judges. 
+> 
+> ALSO little bit of a conflict of interest that @zobront validated his own issue here.
+
+You've created a valid escalation for 1 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted.
+
+#135 and #188 are already duplicates. This issue and #47 touch on the same core issue that `claim()` is not safe to be publicly callable. 
+
+**sherlock-admin**
+
+> Escalation accepted.
+> 
+> #135 and #188 are already duplicates. This issue and #47 touch on the same core issue that `claim()` is not safe to be publicly callable. 
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+**zobront**
+
+Escalate for 5 USDC
+
+This isn’t a dup of #135 or #188. Those two issues are talking about access control for the function. This calls out that there is a specific time enforcement mechanism (`finalAuctionTimestamp`) that is calculated incorrectly, allowing it to be called early.
+
+Yes, I agree that adding access controls (their solution) would reduce the harm from this issue, but they are unrelated issues that just happen to have overlapping solutions. The real solution to this one is to do the calculation properly.
+
+NOTE: The other issue of mine that was dup’d with these is #47, which focuses on that there aren’t restrictions to stop `claim()` being called multiple times. I probably wouldn’t consider that a dup of theirs either, but it’s on the fence so I’m ok with it — but this one is clearly different.
+
+**sherlock-admin**
+
+ > Escalate for 5 USDC
+> 
+> This isn’t a dup of #135 or #188. Those two issues are talking about access control for the function. This calls out that there is a specific time enforcement mechanism (`finalAuctionTimestamp`) that is calculated incorrectly, allowing it to be called early.
+> 
+> Yes, I agree that adding access controls (their solution) would reduce the harm from this issue, but they are unrelated issues that just happen to have overlapping solutions. The real solution to this one is to do the calculation properly.
+> 
+> NOTE: The other issue of mine that was dup’d with these is #47, which focuses on that there aren’t restrictions to stop `claim()` being called multiple times. I probably wouldn’t consider that a dup of theirs either, but it’s on the fence so I’m ok with it — but this one is clearly different.
+
+You've created a valid escalation for 5 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Evert0x**
+
+Escalation accepted. at the initial escalation we misinterpreted the https://github.com/sherlock-audit/2022-10-astaria-judging/issues/135 / https://github.com/sherlock-audit/2022-10-astaria-judging/issues/188 as it was thought they described both issues. 
+
+**sherlock-admin**
+
+> Escalation accepted. at the initial escalation we misinterpreted the https://github.com/sherlock-audit/2022-10-astaria-judging/issues/135 / https://github.com/sherlock-audit/2022-10-astaria-judging/issues/188 as it was thought they described both issues. 
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
+
+
+
+# Issue H-35: Incorrect fees will be charged 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/36 
 
@@ -2170,7 +2587,7 @@ Watsons who escalated this issue will have their escalation amount deducted from
 
 
 
-# Issue H-33: isValidRefinance checks both conditions instead of one, leading to rejection of valid refinances 
+# Issue H-36: isValidRefinance checks both conditions instead of one, leading to rejection of valid refinances 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/22 
 
@@ -2272,12 +2689,12 @@ Watsons who escalated this issue will have their escalation amount deducted from
 
 
 
-# Issue H-34: isValidRefinance will approve invalid refinances and reject valid refinances due to buggy math 
+# Issue H-37: isValidRefinance will approve invalid refinances and reject valid refinances due to buggy math 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/21 
 
 ## Found by 
-0xRajeev, obront, hansfriese
+obront, 0xRajeev, hansfriese
 
 ## Summary
 
@@ -2736,7 +3153,7 @@ Contestants' payouts and scores will be updated according to the changes made on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/201 
 
 ## Found by 
-minhquanym, bin2chen, yixxas, Prefix, 0xRajeev
+yixxas, minhquanym, 0xRajeev, Prefix, bin2chen
 
 ## Summary
 
@@ -2905,7 +3322,7 @@ Make `changeInSlope()` consistent with `calculateSlope()` by implementing a sepa
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/186 
 
 ## Found by 
-chainNue, obront, hansfriese, peanuts, 0xRajeev, csanuragjain
+obront, 0xRajeev, hansfriese, peanuts, csanuragjain, chainNue
 
 ## Summary
 
@@ -3100,7 +3517,7 @@ Implement as per specification or revisit the specification.
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/143 
 
 ## Found by 
-pashov, joestakey, ctf\_sec, ak1, \_\_141345\_\_, neila, rvierdiiev, 0xNazgul, Jeiwan
+pashov, ctf\_sec, neila, rvierdiiev, \_\_141345\_\_, ak1, 0xNazgul, Jeiwan, joestakey
 
 ## Summary
 The first depositor of an ERC4626 vault can maliciously manipulate the share price by depositing the lowest possible amount (1 wei) of liquidity and then artificially inflating ERC4626.totalAssets.
@@ -3416,106 +3833,7 @@ Watsons who escalated this issue will have their escalation amount deducted from
 
 
 
-# Issue M-17: Any public vault without a delegate can be drained 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/69 
-
-## Found by 
-zzykxx, obront, cryptphi, HonorLt, yixxas, rvierdiiev
-
-## Summary
-
-If a public vault is created without a delegate, delegate will have the value of `address(0)`. This is also the value returned by `ecrecover` for invalid signatures (for example, if v is set to a position number that is not 27 or 28), which allows a malicious actor to cause the signature validation to pass for arbitrary parameters, allowing them to drain a vault using a worthless NFT as collateral.
-
-## Vulnerability Detail
-
-When a new Public Vault is created, the Router calls the `init()` function on the vault as follows:
-
-```solidity
-VaultImplementation(vaultAddr).init(
-  VaultImplementation.InitParams(delegate)
-);
-```
-If a delegate wasn't set, this will pass `address(0)` to the vault. If this value is passed, the vault simply skips the assignment, keeping the delegate variable set to the default 0 value:
-
-```solidity
-if (params.delegate != address(0)) {
-  delegate = params.delegate;
-}
-```
-Once the delegate is set to the zero address, any commitment can be validated, even if the signature is incorrect. This is because of a quirk in `ecrecover` which returns `address(0)` for invalid signatures. A signature can be made invalid by providing a positive integer that is not 27 or 28 as the `v` value. The result is that the following function call assigns `recovered = address(0)`:
-
-```solidity
-    address recovered = ecrecover(
-      keccak256(
-        encodeStrategyData(
-          params.lienRequest.strategy,
-          params.lienRequest.merkle.root
-        )
-      ),
-      params.lienRequest.v,
-      params.lienRequest.r,
-      params.lienRequest.s
-    );
-```
-To confirm the validity of the signature, the function performs two checks:
-```solidity
-require(
-  recovered == params.lienRequest.strategy.strategist,
-  "strategist must match signature"
-);
-require(
-  recovered == owner() || recovered == delegate,
-  "invalid strategist"
-);
-```
-These can be easily passed by setting the `strategist` in the params to `address(0)`. At this point, all checks will pass and the parameters will be accepted as approved by the vault.
-
-With this power, a borrower can create params that allow them to borrow the vault's full funds in exchange for a worthless NFT, allowing them to drain the vault and steal all the user's funds.
-
-## Impact
-
-All user's funds held in a vault with no delegate set can be stolen.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/AstariaRouter.sol#L537-L539
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/VaultImplementation.sol#L118-L124
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/VaultImplementation.sol#L167-L185
-
-## Tool used
-
-Manual Review, Foundry
-
-## Recommendation
-
-Add a require statement that the recovered address cannot be the zero address:
-
-```solidity
-require(recovered != address(0));
-```
-
-## Discussion
-
-**sherlock-admin**
-
-> Escalate for 1 USDC
-> 
-> Disagree with high. Requires a external factors and a bit of phishing to make this work. User would have to voluntarily make a lien position that has strategist == address(0) which should raise red flags. Medium seems more fitting. 
-> 
-> Relevant lines:
-> 
-> https://github.com/sherlock-audit/2022-10-astaria/blob/7d12a5516b7c74099e1ce6fb4ec87c102aec2786/src/VaultImplementation.sol#L178-L181
-> 
-> 
-
-You've deleted an escalation for this issue.
-
-
-
-# Issue M-18: LienToken.createLien doesn't check if user should be liquidated and provides new loan 
+# Issue M-17: LienToken.createLien doesn't check if user should be liquidated and provides new loan 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/66 
 
@@ -3574,12 +3892,12 @@ Contestants' payouts and scores will be updated according to the changes made on
 
 
 
-# Issue M-19: Strategist nonce is not checked 
+# Issue M-18: Strategist nonce is not checked 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/59 
 
 ## Found by 
-HonorLt, rvierdiiev, ctf\_sec, cryptphi
+HonorLt, ctf\_sec, cryptphi, rvierdiiev
 
 ## Summary
 Strategist nonce is not checked while checking commitment. This makes impossible for strategist to cancel signed commitment.
@@ -3643,7 +3961,7 @@ Manual Review
 ## Recommendation
 Give ability to strategist to call `increaseNonce` function.
 
-# Issue M-20: _validateCommitment fails for approved operators 
+# Issue M-19: _validateCommitment fails for approved operators 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/52 
 
@@ -3694,12 +4012,12 @@ Include an additional check to confirm whether the `msg.sender` is approved as a
     }
 ```
 
-# Issue M-21: timeToEpochEnd calculates backwards, breaking protocol math 
+# Issue M-20: timeToEpochEnd calculates backwards, breaking protocol math 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/50 
 
 ## Found by 
-0xNazgul, 0xRajeev, obront, hansfriese
+obront, 0xNazgul, 0xRajeev, hansfriese
 
 ## Summary
 
@@ -3763,99 +4081,7 @@ function timeToEpochEnd() public view returns (uint256) {
 }
 ```
 
-# Issue M-22: Strategists are paid 10x the vault fee because of a math error 
-
-Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/49 
-
-## Found by 
-obront
-
-## Summary
-
-Strategists set their vault fee in BPS (x / 10,000), but are paid out as x / 1,000. The result is that strategists will always earn 10x whatever vault fee they set.
-
-## Vulnerability Detail
-
-Whenever any payment is made towards a public vault, `beforePayment()` is called, which calls `_handleStrategistInterestReward()`.
-
-The function is intended to take the amount being paid, adjust by the vault fee to get the fee amount, and convert that amount of value into shares, which are added to `strategistUnclaimedShares`.
-
-```solidity
-function _handleStrategistInterestReward(uint256 lienId, uint256 amount)
-    internal
-    virtual
-    override
-  {
-    if (VAULT_FEE() != uint256(0)) {
-      uint256 interestOwing = LIEN_TOKEN().getInterest(lienId);
-      uint256 x = (amount > interestOwing) ? interestOwing : amount;
-      uint256 fee = x.mulDivDown(VAULT_FEE(), 1000);
-      strategistUnclaimedShares += convertToShares(fee);
-    }
-  }
-```
-Since the vault fee is stored in basis points, to get the vault fee, we should take the amount, multiply it by `VAULT_FEE()` and divide by 10,000. However, we accidentally divide by 1,000, which results in a 10x larger reward for the strategist than intended.
-
-As an example, if the vault fee is intended to be 10%, we would set `VAULT_FEE = 1000`. In that case, for any amount paid off, we would calculate `fee = amount * 1000 / 1000` and the full amount would be considered a fee for the strategist.
-
-## Impact
-
-Strategists will be paid 10x the agreed upon rate for their role, with the cost being borne by users.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2022-10-astaria/blob/main/src/PublicVault.sol#L513-L524
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Change the `1000` in the `_handleStrategistInterestReward()` function to `10_000`.
-
-## Discussion
-
-**IAmTurnipBoy**
-
-Escalate for 1 USDC
-
-Don't agree with high severity. Fee can easily be changed by protocol after the fact to fix this, which is why medium makes more sense. Simple to fix as a parameter change.
-
-**sherlock-admin**
-
- > Escalate for 1 USDC
-> 
-> Don't agree with high severity. Fee can easily be changed by protocol after the fact to fix this, which is why medium makes more sense. Simple to fix as a parameter change.
-
-You've created a valid escalation for 1 USDC!
-
-To remove the escalation from consideration: Delete your comment.
-To change the amount you've staked on this escalation: Edit your comment **(do not create a new comment)**.
-
-You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
-
-**Evert0x**
-
-Escalation accepted.
-
-
-**sherlock-admin**
-
-> Escalation accepted.
-> 
-
-This issue's escalations have been accepted!
-
-Contestants' payouts and scores will be updated according to the changes made on this issue.
-
-**zobront**
-
-@Evert0x @IAmTurnipBoy VAULT_FEE is set as an immutable arg on the Vault, so there is no ability to change it later. It's permanently set and they'd need to redeploy the whole protocol to change it. This is clearly a high.
-
-
-
-# Issue M-23: Underlying With Non-Standard Decimals Not Supported 
+# Issue M-21: Underlying With Non-Standard Decimals Not Supported 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/33 
 
@@ -3891,12 +4117,12 @@ Manual Review
 
 - Consider whether the addition of capital that does not use 18 decimals is desirable in the future. If it is, refactor contracts to support tokens with non-standard decimals.
 
-# Issue M-24: _payment() function transfers full paymentAmount, overpaying first liens 
+# Issue M-22: _payment() function transfers full paymentAmount, overpaying first liens 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/28 
 
 ## Found by 
-tives, ak1, obront, \_\_141345\_\_, bin2chen, 0xRajeev, hansfriese, rvierdiiev
+obront, 0xRajeev, hansfriese, rvierdiiev, ak1, \_\_141345\_\_, bin2chen, tives
 
 ## Summary
 
@@ -3957,7 +4183,7 @@ In `_payment()`, if `lien.amount < paymentAmount`, set `paymentAmount = lien.amo
 
 The result will be that, in this case, only `lien.amount` is transferred to the lien owner, and this value is also returned from the function to accurately represent the amount that was paid.
 
-# Issue M-25: _getInterest() function uses block.timestamp instead of the inputted timestamp 
+# Issue M-23: _getInterest() function uses block.timestamp instead of the inputted timestamp 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/25 
 
@@ -4003,7 +4229,7 @@ Manual Review
 
 Change `block.timestamp` to `timestamp` so that the if statement checks correctly.
 
-# Issue M-26: Vault Fee uses incorrect offset leading to wildly incorrect value, allowing strategists to steal all funds 
+# Issue M-24: Vault Fee uses incorrect offset leading to wildly incorrect value, allowing strategists to steal all funds 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/19 
 
@@ -4068,12 +4294,12 @@ Manual Review
 
 Set the offset for `VAULT_FEE()` to 165. I tested this value in the POC I created and it correctly returned the value of 5000.
 
-# Issue M-27: Bids cannot be created within timeBuffer of completion of a max duration auction 
+# Issue M-25: Bids cannot be created within timeBuffer of completion of a max duration auction 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/18 
 
 ## Found by 
-rvierdiiev, minhquanym, 0x4141, obront, hansfriese, TurnipBoy, peanuts, yixxas, neila, Prefix, csanuragjain, 0xRajeev, Jeiwan
+obront, yixxas, minhquanym, neila, 0xRajeev, TurnipBoy, hansfriese, Prefix, 0x4141, rvierdiiev, peanuts, csanuragjain, Jeiwan
 
 ## Summary
 
@@ -4126,7 +4352,7 @@ Change this assignment to simply assign `duration` to `maxDuration`, as follows:
 auctions[tokenId].duration = auctions[tokenId].maxDuration
 ```
 
-# Issue M-28: ERC4626 does not work with fee-on-transfer tokens 
+# Issue M-26: ERC4626 does not work with fee-on-transfer tokens 
 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/3 
 
