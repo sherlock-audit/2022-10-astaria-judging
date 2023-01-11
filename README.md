@@ -135,7 +135,7 @@ In this case, lien's slope calculation won't be affected in the `beforePayment` 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/259 
 
 ## Found by 
-\_\_141345\_\_, 0xRajeev
+0xRajeev, \_\_141345\_\_
 
 ## Summary
 
@@ -270,7 +270,7 @@ Watsons who escalated this issue will have their escalation amount deducted from
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/233 
 
 ## Found by 
-obront, yixxas, ctf\_sec, TurnipBoy, zzykxx, 0x0, tives
+TurnipBoy, 0x0, obront, tives, yixxas, ctf\_sec, zzykxx
 
 ## Summary
 
@@ -351,7 +351,7 @@ Contestants' payouts and scores will be updated according to the changes made on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/204 
 
 ## Found by 
-HonorLt, 0xRajeev, rvierdiiev, bin2chen, Jeiwan
+bin2chen, HonorLt, rvierdiiev, Jeiwan, 0xRajeev
 
 ## Summary
 
@@ -425,7 +425,7 @@ Contestants' payouts and scores will be updated according to the changes made on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/202 
 
 ## Found by 
-minhquanym, neila, 0xRajeev, TurnipBoy, hansfriese, Prefix, peanuts, csanuragjain, bin2chen, Jeiwan, chainNue
+bin2chen, chainNue, csanuragjain, TurnipBoy, peanuts, neila, Prefix, Jeiwan, hansfriese, 0xRajeev, minhquanym
 
 ## Summary
 
@@ -499,7 +499,7 @@ Contestants' payouts and scores will be updated according to the changes made on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/199 
 
 ## Found by 
-0x4141, TurnipBoy, 0xRajeev, bin2chen, Jeiwan
+bin2chen, TurnipBoy, Jeiwan, 0xRajeev, 0x4141
 
 ## Summary
 
@@ -572,7 +572,7 @@ The cancellation amount required should be the reserve price + liquidation fee, 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/197 
 
 ## Found by 
-zzykxx, 0xRajeev
+0xRajeev, zzykxx
 
 ## Summary
 
@@ -659,7 +659,7 @@ Contestants' payouts and scores will be updated according to the changes made on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/196 
 
 ## Found by 
-yixxas, ctf\_sec, neila, 0xRajeev, supernova, rvierdiiev, zzykxx, 8olidity, cccz
+8olidity, rvierdiiev, supernova, neila, yixxas, ctf\_sec, 0xRajeev, cccz, zzykxx
 
 ## Summary
 
@@ -774,7 +774,7 @@ Manual Review
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/193 
 
 ## Found by 
-obront, 0xRajeev, rvierdiiev
+0xRajeev, rvierdiiev, obront
 
 ## Summary
 
@@ -809,7 +809,7 @@ Manual Review
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/190 
 
 ## Found by 
-obront, Jeiwan, zzykxx, 0xRajeev
+0xRajeev, obront, zzykxx, Jeiwan
 
 ## Summary
 
@@ -878,7 +878,7 @@ Contestants' payouts and scores will be updated according to the changes made on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/188 
 
 ## Found by 
-obront, TurnipBoy, 0xRajeev, rvierdiiev
+0xRajeev, TurnipBoy, obront, rvierdiiev
 
 ## Summary
 
@@ -1004,7 +1004,7 @@ Manual Review
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/182 
 
 ## Found by 
-obront, 0xRajeev, hansfriese, rvierdiiev, zzykxx, Jeiwan, tives
+obront, tives, rvierdiiev, Jeiwan, hansfriese, 0xRajeev, zzykxx
 
 ## Summary
 
@@ -1191,7 +1191,7 @@ Revisit the logic that updates `lien.last` in the protocol to ensure no reverts 
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/176 
 
 ## Found by 
-TurnipBoy, 0x4141, 0xRajeev, bin2chen
+0xRajeev, bin2chen, TurnipBoy, 0x4141
 
 ## Summary
 
@@ -1917,7 +1917,7 @@ function validateAndParse... {
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/69 
 
 ## Found by 
-obront, HonorLt, yixxas, rvierdiiev, zzykxx, cryptphi
+obront, HonorLt, rvierdiiev, cryptphi, yixxas, zzykxx
 
 ## Summary
 
@@ -2694,7 +2694,7 @@ Watsons who escalated this issue will have their escalation amount deducted from
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/21 
 
 ## Found by 
-obront, 0xRajeev, hansfriese
+hansfriese, obront, 0xRajeev
 
 ## Summary
 
@@ -3153,7 +3153,7 @@ Contestants' payouts and scores will be updated according to the changes made on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/201 
 
 ## Found by 
-yixxas, minhquanym, 0xRajeev, Prefix, bin2chen
+bin2chen, Prefix, yixxas, 0xRajeev, minhquanym
 
 ## Summary
 
@@ -3322,7 +3322,7 @@ Make `changeInSlope()` consistent with `calculateSlope()` by implementing a sepa
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/186 
 
 ## Found by 
-obront, 0xRajeev, hansfriese, peanuts, csanuragjain, chainNue
+csanuragjain, chainNue, obront, peanuts, hansfriese, 0xRajeev
 
 ## Summary
 
@@ -3365,7 +3365,7 @@ will fix but its a convention issue we want auctions to start immediately not on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/174 
 
 ## Found by 
-TurnipBoy, 0xRajeev
+0xRajeev, TurnipBoy
 
 ## Summary
 
@@ -3517,7 +3517,7 @@ Implement as per specification or revisit the specification.
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/143 
 
 ## Found by 
-pashov, ctf\_sec, neila, rvierdiiev, \_\_141345\_\_, ak1, 0xNazgul, Jeiwan, joestakey
+ak1, 0xNazgul, joestakey, rvierdiiev, neila, pashov, Jeiwan, ctf\_sec, \_\_141345\_\_
 
 ## Summary
 The first depositor of an ERC4626 vault can maliciously manipulate the share price by depositing the lowest possible amount (1 wei) of liquidity and then artificially inflating ERC4626.totalAssets.
@@ -3897,7 +3897,7 @@ Contestants' payouts and scores will be updated according to the changes made on
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/59 
 
 ## Found by 
-HonorLt, ctf\_sec, cryptphi, rvierdiiev
+cryptphi, rvierdiiev, HonorLt, ctf\_sec
 
 ## Summary
 Strategist nonce is not checked while checking commitment. This makes impossible for strategist to cancel signed commitment.
@@ -3966,7 +3966,7 @@ Give ability to strategist to call `increaseNonce` function.
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/52 
 
 ## Found by 
-obront, rvierdiiev
+rvierdiiev, obront
 
 ## Summary
 
@@ -4017,7 +4017,7 @@ Include an additional check to confirm whether the `msg.sender` is approved as a
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/50 
 
 ## Found by 
-obront, 0xNazgul, 0xRajeev, hansfriese
+hansfriese, 0xNazgul, obront, 0xRajeev
 
 ## Summary
 
@@ -4122,7 +4122,7 @@ Manual Review
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/28 
 
 ## Found by 
-obront, 0xRajeev, hansfriese, rvierdiiev, ak1, \_\_141345\_\_, bin2chen, tives
+bin2chen, ak1, obront, tives, rvierdiiev, 0xRajeev, \_\_141345\_\_, hansfriese
 
 ## Summary
 
@@ -4234,7 +4234,7 @@ Change `block.timestamp` to `timestamp` so that the if statement checks correctl
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/19 
 
 ## Found by 
-obront, zzykxx
+zzykxx, obront
 
 ## Summary
 
@@ -4299,7 +4299,7 @@ Set the offset for `VAULT_FEE()` to 165. I tested this value in the POC I create
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/18 
 
 ## Found by 
-obront, yixxas, minhquanym, neila, 0xRajeev, TurnipBoy, hansfriese, Prefix, 0x4141, rvierdiiev, peanuts, csanuragjain, Jeiwan
+csanuragjain, TurnipBoy, obront, rvierdiiev, peanuts, neila, 0xRajeev, Prefix, Jeiwan, yixxas, hansfriese, minhquanym, 0x4141
 
 ## Summary
 
@@ -4357,7 +4357,7 @@ auctions[tokenId].duration = auctions[tokenId].maxDuration
 Source: https://github.com/sherlock-audit/2022-10-astaria-judging/issues/3 
 
 ## Found by 
-pashov, w42d3n, Bnke0x0
+Bnke0x0, w42d3n, pashov
 
 ## Summary
 
